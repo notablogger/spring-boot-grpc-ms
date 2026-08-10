@@ -1,0 +1,28 @@
+services:
+  payment-service:
+    build:
+      context: .
+      dockerfile: payment-service/Dockerfile
+    container_name: payment-service
+    ports:
+      - "9090:9090"
+    networks:
+      - grpc-net
+
+  order-service:
+    build:
+      context: .
+      dockerfile: order-service/Dockerfile
+    container_name: order-service
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+    ports:
+      - "8080:8080"
+    depends_on:
+      - payment-service
+    networks:
+      - grpc-net
+
+networks:
+  grpc-net:
+    driver: bridge

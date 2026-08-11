@@ -34,14 +34,17 @@ public class PaymentStatusClient {
      */
     public PaymentStatusResponse checkPaymentStatus(String orderId) {
         try {
+            // Build the gRPC request with the order ID
             return paymentServiceStub.checkPaymentStatus(
                     PaymentStatusRequest.newBuilder()
                             .setOrderId(orderId)
                             .build());
         } catch (StatusRuntimeException e) {
+            // Translate NOT_FOUND status into domain exception for REST error handling
             if (e.getStatus().getCode() == Status.Code.NOT_FOUND) {
                 throw new PaymentNotFoundException(orderId, e);
             }
+            // All other errors indicate payment-service is unreachable or failed
             throw new PaymentServiceUnavailableException(
                     "payment-service call failed for order id '%s'".formatted(orderId), e);
         }

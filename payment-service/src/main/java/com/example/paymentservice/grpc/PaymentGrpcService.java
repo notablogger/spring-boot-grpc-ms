@@ -51,6 +51,7 @@ public class PaymentGrpcService extends PaymentServiceGrpc.PaymentServiceImplBas
     @Override
     public void checkPaymentStatus(PaymentStatusRequest request, StreamObserver<PaymentStatusResponse> responseObserver) {
         String orderId = request.getOrderId();
+        // Validate that order ID is not blank
         if (!StringUtils.hasText(orderId)) {
             responseObserver.onError(Status.INVALID_ARGUMENT
                     .withDescription("order_id must not be blank")
@@ -58,8 +59,10 @@ public class PaymentGrpcService extends PaymentServiceGrpc.PaymentServiceImplBas
             return;
         }
 
+        // Query repository for payment record by order ID
         var payment = paymentRepository.findByOrderId(orderId);
         if (payment.isEmpty()) {
+            // No payment found for this order
             log.debug("No payment found for order id {}", orderId);
             responseObserver.onError(Status.NOT_FOUND
                     .withDescription("No payment found for order id '%s'".formatted(orderId))
@@ -67,6 +70,7 @@ public class PaymentGrpcService extends PaymentServiceGrpc.PaymentServiceImplBas
             return;
         }
 
+        // Send successful response and complete the stream
         responseObserver.onNext(toResponse(payment.get()));
         responseObserver.onCompleted();
     }
@@ -78,6 +82,7 @@ public class PaymentGrpcService extends PaymentServiceGrpc.PaymentServiceImplBas
      * @return a PaymentStatusResponse protobuf message
      */
     private static PaymentStatusResponse toResponse(Payment payment) {
+        // Convert domain Payment object to protobuf response message
         return PaymentStatusResponse.newBuilder()
                 .setOrderId(payment.orderId())
                 .setPaymentId(payment.paymentId())
@@ -95,6 +100,7 @@ public class PaymentGrpcService extends PaymentServiceGrpc.PaymentServiceImplBas
      */
     private static com.example.grpc.payment.v1.PaymentStatus toProtoStatus(
             com.example.paymentservice.model.PaymentStatus status) {
+        // Map domain enum to protobuf enum
         return switch (status) {
             case PENDING -> com.example.grpc.payment.v1.PaymentStatus.PENDING;
             case COMPLETED -> com.example.grpc.payment.v1.PaymentStatus.COMPLETED;

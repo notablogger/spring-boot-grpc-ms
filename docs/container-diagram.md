@@ -24,8 +24,8 @@ flowchart LR
     actor -->|"1. get token (password grant)"| keycloak
     actor -->|"2. HTTP GET .../payment-status<br/>Authorization: Bearer JWT"| order
     order -->|"3. gRPC CheckPaymentStatus(order_id)<br/>authorization: Bearer JWT (relayed)"| payment
-    order -.->|validate JWT (JWKS)| keycloak
-    payment -.->|validate JWT (JWKS)| keycloak
+    order -.->|"validate JWT (JWKS)"| keycloak
+    payment -.->|"validate JWT (JWKS)"| keycloak
     order -.->|reads at startup| ordersJson
     payment -.->|reads at startup| paymentsJson
 

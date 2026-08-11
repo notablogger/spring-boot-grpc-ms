@@ -118,14 +118,14 @@ Other ids to try (as `cust-01`, whose orders are `ORD-1001` and `ORD-1004`):
 |---|---|
 | `ORD-1001` | `COMPLETED` payment |
 | `ORD-1004` | `REFUNDED` payment |
-| `ORD-1002` | Belongs to `cust-02`, not `cust-01` → `403` |
-| `ORD-1005` | Order exists, but no payment record → `404` |
-| anything else | Order doesn't exist → `404` |
+| `ORD-1002`, `ORD-1003`, `ORD-1005` | Belong to a different customer → `403` |
+| anything nonexistent | Order doesn't exist → `404` |
 | (no `Authorization` header) | → `401` |
 
 Log in as `admin` / `admin123` instead to check any order regardless of who
-it belongs to, including `ORD-1002` (`PENDING`) and `ORD-1003` (`FAILED`).
-See [docs/auth.md](docs/auth.md) for the full set of test users and the
+it belongs to, including `ORD-1002` (`PENDING`), `ORD-1003` (`FAILED`), and
+`ORD-1005` (order exists, but no payment record → `404`). See
+[docs/auth.md](docs/auth.md) for the full set of test users and the
 role/ownership rules.
 
 ## Testing

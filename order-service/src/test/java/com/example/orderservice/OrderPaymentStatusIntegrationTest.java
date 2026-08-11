@@ -4,7 +4,9 @@ import com.example.grpc.payment.v1.PaymentServiceGrpc;
 import com.example.grpc.payment.v1.PaymentStatus;
 import com.example.grpc.payment.v1.PaymentStatusRequest;
 import com.example.grpc.payment.v1.PaymentStatusResponse;
+import com.example.orderservice.model.PaymentStatusEvent;
 import com.example.orderservice.security.JwtRelayClientInterceptor;
+import com.example.orderservice.watch.PaymentStatusEventStore;
 import com.nimbusds.jose.JOSEException;
 import com.nimbusds.jose.JWSAlgorithm;
 import com.nimbusds.jose.JWSHeader;
@@ -82,6 +84,9 @@ class OrderPaymentStatusIntegrationTest {
 
     @Autowired
     private TestRestTemplate restTemplate;
+
+    @Autowired
+    private PaymentStatusEventStore eventStore;
 
     @BeforeAll
     static void startFakePaymentService() throws IOException {
@@ -171,10 +176,61 @@ class OrderPaymentStatusIntegrationTest {
         assertThat(lastAuthorizationHeader.get()).isEqualTo("Bearer " + token);
     }
 
+    @Test
+    void adminCanTriggerWatchAndEventsAreRecorded() {
+        ResponseEntity<Void> response = postWatchWithToken("/api/v1/orders/ORD-1001/payment-status/watch", token("some-admin", "admin"));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+
+        // The watch runs in the background (a virtual thread), so poll for
+        // the event rather than assuming it's already recorded by the time
+        // the 202 response comes back.
+        List<PaymentStatusEvent> events = awaitEvents("ORD-1001");
+        assertThat(events).hasSize(1);
+        assertThat(events.get(0).status()).isEqualTo("COMPLETED");
+    }
+
+    @Test
+    void customerCannotTriggerWatch() {
+        // Watching is admin-only, unlike the regular payment-status check.
+        ResponseEntity<Void> response = postWatchWithToken("/api/v1/orders/ORD-1001/payment-status/watch", token("cust-01", "customer"));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    @Test
+    void watchReturns404ForUnknownOrder() {
+        ResponseEntity<Void> response = postWatchWithToken("/api/v1/orders/UNKNOWN-ORDER/payment-status/watch", token("some-admin", "admin"));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
     private ResponseEntity<String> getWithToken(String path, String token) {
         HttpHeaders headers = new HttpHeaders();
         headers.setBearerAuth(token);
         return restTemplate.exchange(path, HttpMethod.GET, new HttpEntity<>(headers), String.class);
+    }
+
+    private ResponseEntity<Void> postWatchWithToken(String path, String token) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(token);
+        return restTemplate.exchange(path, HttpMethod.POST, new HttpEntity<>(headers), Void.class);
+    }
+
+    private List<PaymentStatusEvent> awaitEvents(String orderId) {
+        for (int attempt = 0; attempt < 40; attempt++) {
+            List<PaymentStatusEvent> events = eventStore.eventsFor(orderId);
+            if (!events.isEmpty()) {
+                return events;
+            }
+            try {
+                Thread.sleep(50);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException(e);
+            }
+        }
+        throw new AssertionError("No payment status events recorded for order " + orderId + " within timeout");
     }
 
     private static String token(String username, String... realmRoles) {
@@ -265,6 +321,16 @@ class OrderPaymentStatusIntegrationTest {
             responseObserver.onError(Status.NOT_FOUND
                     .withDescription("No payment found for order id '%s'".formatted(request.getOrderId()))
                     .asRuntimeException());
+        }
+
+        // Reuses the same single-update-then-complete behaviour as
+        // checkPaymentStatus() -- the fake doesn't need to simulate a real
+        // status transition to prove order-service correctly consumes,
+        // logs, and records whatever the stream sends.
+        @Override
+        public void watchPaymentStatus(
+                PaymentStatusRequest request, StreamObserver<PaymentStatusResponse> responseObserver) {
+            checkPaymentStatus(request, responseObserver);
         }
     }
 }

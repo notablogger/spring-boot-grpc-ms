@@ -9,9 +9,14 @@ import io.grpc.Status;
 import io.grpc.stub.StreamObserver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.grpc.server.service.GrpcService;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.util.StringUtils;
+
+import java.time.Duration;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 /**
  * gRPC endpoint implementation for {@code payment.v1.PaymentService}, backed by
@@ -24,36 +29,22 @@ public class PaymentGrpcService extends PaymentServiceGrpc.PaymentServiceImplBas
     private static final Logger log = LoggerFactory.getLogger(PaymentGrpcService.class);
 
     private final PaymentRepository paymentRepository;
+    private final ScheduledExecutorService watchScheduler;
+    private final Duration simulatedSettlementDelay;
 
-    /**
-     * Creates a new PaymentGrpcService with the given payment repository.
-     *
-     * @param paymentRepository the repository for looking up payments by order ID
-     */
-    public PaymentGrpcService(PaymentRepository paymentRepository) {
+    public PaymentGrpcService(
+            PaymentRepository paymentRepository,
+            ScheduledExecutorService watchScheduler,
+            @Value("${payment.watch.simulated-settlement-delay:PT3S}") Duration simulatedSettlementDelay) {
         this.paymentRepository = paymentRepository;
+        this.watchScheduler = watchScheduler;
+        this.simulatedSettlementDelay = simulatedSettlementDelay;
     }
 
-    /**
-     * Handles incoming gRPC requests to check the payment status for an order.
-     *
-     * <p>This method implements the async gRPC pattern using StreamObserver:
-     * <ul>
-     *   <li>Validates the order ID is not blank</li>
-     *   <li>Queries the repository for a matching payment record</li>
-     *   <li>Returns a PaymentStatusResponse via onNext() if found</li>
-     *   <li>Returns a NOT_FOUND error status if not found</li>
-     *   <li>Always calls onCompleted() or onError() to terminate the stream</li>
-     * </ul>
-     *
-     * @param request the gRPC request containing the order ID
-     * @param responseObserver the stream observer for sending the response or error back to the client
-     */
     @PreAuthorize("hasAnyRole('customer', 'admin')")
     @Override
     public void checkPaymentStatus(PaymentStatusRequest request, StreamObserver<PaymentStatusResponse> responseObserver) {
         String orderId = request.getOrderId();
-        // Validate that order ID is not blank
         if (!StringUtils.hasText(orderId)) {
             responseObserver.onError(Status.INVALID_ARGUMENT
                     .withDescription("order_id must not be blank")
@@ -61,10 +52,8 @@ public class PaymentGrpcService extends PaymentServiceGrpc.PaymentServiceImplBas
             return;
         }
 
-        // Query repository for payment record by order ID
         var payment = paymentRepository.findByOrderId(orderId);
         if (payment.isEmpty()) {
-            // No payment found for this order
             log.debug("No payment found for order id {}", orderId);
             responseObserver.onError(Status.NOT_FOUND
                     .withDescription("No payment found for order id '%s'".formatted(orderId))
@@ -72,19 +61,56 @@ public class PaymentGrpcService extends PaymentServiceGrpc.PaymentServiceImplBas
             return;
         }
 
-        // Send successful response and complete the stream
         responseObserver.onNext(toResponse(payment.get()));
         responseObserver.onCompleted();
     }
 
     /**
-     * Converts a Payment domain object into a gRPC PaymentStatusResponse.
-     *
-     * @param payment the payment domain object to convert
-     * @return a PaymentStatusResponse protobuf message
+     * Pushes the current status immediately, then -- for a payment still
+     * {@code PENDING} -- one further update once it settles, before closing
+     * the stream. There's no real payment-events source behind this (no
+     * broker, no polling loop), so settlement is simulated with a delayed
+     * callback on {@link #watchScheduler}; a real implementation would
+     * subscribe to genuine status-change events instead.
      */
+    @PreAuthorize("hasAnyRole('customer', 'admin')")
+    @Override
+    public void watchPaymentStatus(PaymentStatusRequest request, StreamObserver<PaymentStatusResponse> responseObserver) {
+        String orderId = request.getOrderId();
+        if (!StringUtils.hasText(orderId)) {
+            responseObserver.onError(Status.INVALID_ARGUMENT
+                    .withDescription("order_id must not be blank")
+                    .asRuntimeException());
+            return;
+        }
+
+        var payment = paymentRepository.findByOrderId(orderId);
+        if (payment.isEmpty()) {
+            log.debug("No payment found for order id {}", orderId);
+            responseObserver.onError(Status.NOT_FOUND
+                    .withDescription("No payment found for order id '%s'".formatted(orderId))
+                    .asRuntimeException());
+            return;
+        }
+
+        Payment current = payment.get();
+        responseObserver.onNext(toResponse(current));
+
+        if (current.status() != com.example.paymentservice.model.PaymentStatus.PENDING) {
+            responseObserver.onCompleted();
+            return;
+        }
+
+        log.debug("Order {} is PENDING; scheduling simulated settlement in {}", orderId, simulatedSettlementDelay);
+        watchScheduler.schedule(() -> {
+            Payment settled = new Payment(current.orderId(), current.paymentId(),
+                    com.example.paymentservice.model.PaymentStatus.COMPLETED, current.amount(), current.currency());
+            responseObserver.onNext(toResponse(settled));
+            responseObserver.onCompleted();
+        }, simulatedSettlementDelay.toMillis(), TimeUnit.MILLISECONDS);
+    }
+
     private static PaymentStatusResponse toResponse(Payment payment) {
-        // Convert domain Payment object to protobuf response message
         return PaymentStatusResponse.newBuilder()
                 .setOrderId(payment.orderId())
                 .setPaymentId(payment.paymentId())
@@ -94,15 +120,8 @@ public class PaymentGrpcService extends PaymentServiceGrpc.PaymentServiceImplBas
                 .build();
     }
 
-    /**
-     * Converts a domain PaymentStatus enum to its protobuf equivalent.
-     *
-     * @param status the domain PaymentStatus value
-     * @return the corresponding protobuf PaymentStatus value
-     */
     private static com.example.grpc.payment.v1.PaymentStatus toProtoStatus(
             com.example.paymentservice.model.PaymentStatus status) {
-        // Map domain enum to protobuf enum
         return switch (status) {
             case PENDING -> com.example.grpc.payment.v1.PaymentStatus.PENDING;
             case COMPLETED -> com.example.grpc.payment.v1.PaymentStatus.COMPLETED;

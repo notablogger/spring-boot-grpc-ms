@@ -10,6 +10,8 @@ import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
 import org.springframework.stereotype.Component;
 
+import java.util.Iterator;
+
 /**
  * Thin wrapper around the generated {@link PaymentServiceGrpc} blocking stub that
  * translates gRPC status codes into order-service domain exceptions. The stub
@@ -56,5 +58,20 @@ public class PaymentStatusClient {
             throw new PaymentServiceUnavailableException(
                     "payment-service call failed for order id '%s'".formatted(orderId), e);
         }
+    }
+
+    /**
+     * Opens payment-service's server-streaming WatchPaymentStatus RPC. The
+     * blocking stub exposes this as a blocking {@link Iterator}: each call
+     * to {@code next()} blocks until the next update arrives (or the stream
+     * closes). Errors surface as {@link StatusRuntimeException} from
+     * {@code hasNext()}/{@code next()} to the caller, which is expected to
+     * be iterating on a background thread already.
+     */
+    public Iterator<PaymentStatusResponse> watchPaymentStatus(String orderId) {
+        return paymentServiceStub.watchPaymentStatus(
+                PaymentStatusRequest.newBuilder()
+                        .setOrderId(orderId)
+                        .build());
     }
 }

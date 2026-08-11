@@ -1,7 +1,9 @@
 package com.example.paymentservice.security;
 
 import com.example.grpc.payment.v1.PaymentServiceGrpc;
+import com.example.grpc.payment.v1.PaymentStatus;
 import com.example.grpc.payment.v1.PaymentStatusRequest;
+import com.example.grpc.payment.v1.PaymentStatusResponse;
 import io.grpc.ManagedChannel;
 import io.grpc.Metadata;
 import io.grpc.Status;
@@ -19,6 +21,7 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import java.time.Instant;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
@@ -37,7 +40,10 @@ import static org.mockito.Mockito.when;
  * well-tested code, not ours; everything downstream of {@code decode()}
  * (claims-to-authority mapping, authentication, authorization) is real.
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE, properties = {
+        // Speeds up watchEmitsTwoUpdatesForPendingPayment() below; production default is PT3S.
+        "payment.watch.simulated-settlement-delay=PT0.1S"
+})
 class PaymentServiceSecurityIntegrationTest {
 
     private static final String IN_PROCESS_SERVER_NAME = "payment-service-security-test";
@@ -103,6 +109,45 @@ class PaymentServiceSecurityIntegrationTest {
 
         assertThat(response.getOrderId()).isEqualTo("ORD-1001");
         assertThat(response.getPaymentId()).isEqualTo("PAY-5001");
+    }
+
+    @Test
+    void watchRejectsCallWithNoToken() {
+        PaymentServiceGrpc.PaymentServiceBlockingStub stub = stub();
+        Iterator<PaymentStatusResponse> updates = stub.watchPaymentStatus(request("ORD-1001"));
+
+        assertThatThrownBy(updates::hasNext)
+                .isInstanceOf(StatusRuntimeException.class)
+                .extracting(ex -> ((StatusRuntimeException) ex).getStatus().getCode())
+                .isEqualTo(Status.Code.UNAUTHENTICATED);
+    }
+
+    @Test
+    void watchEmitsSingleUpdateForAlreadySettledPayment() {
+        // ORD-1001 is COMPLETED in payments.json -- already terminal, so the
+        // stream should close after exactly one update.
+        when(jwtDecoder.decode("valid-token")).thenReturn(validJwt("cust-01", "customer"));
+        PaymentServiceGrpc.PaymentServiceBlockingStub stub = stubWithToken("valid-token");
+
+        Iterator<PaymentStatusResponse> updates = stub.watchPaymentStatus(request("ORD-1001"));
+
+        assertThat(updates.next().getStatus()).isEqualTo(PaymentStatus.COMPLETED);
+        assertThat(updates.hasNext()).isFalse();
+    }
+
+    @Test
+    void watchEmitsTwoUpdatesForPendingPayment() {
+        // ORD-1002 is PENDING in payments.json -- the simulated settlement
+        // (sped up via the class-level @SpringBootTest properties) should
+        // push a second, COMPLETED update before the stream closes.
+        when(jwtDecoder.decode("valid-token")).thenReturn(validJwt("cust-02", "customer"));
+        PaymentServiceGrpc.PaymentServiceBlockingStub stub = stubWithToken("valid-token");
+
+        Iterator<PaymentStatusResponse> updates = stub.watchPaymentStatus(request("ORD-1002"));
+
+        assertThat(updates.next().getStatus()).isEqualTo(PaymentStatus.PENDING);
+        assertThat(updates.next().getStatus()).isEqualTo(PaymentStatus.COMPLETED);
+        assertThat(updates.hasNext()).isFalse();
     }
 
     private PaymentServiceGrpc.PaymentServiceBlockingStub stub() {

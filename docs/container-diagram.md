@@ -49,10 +49,14 @@ flowchart LR
   response.
 - **Order Service → Payment Service**: synchronous unary gRPC call defined in
   [`proto/payment.proto`](../proto/payment.proto), carrying the **same**
-  bearer token relayed from the inbound REST request. This is the only
+  bearer token relayed from the inbound REST request. This is the primary
   integration point between the two services — they share no database and no
   code beyond the generated stub classes and a small, duplicated
-  Keycloak-claims-to-authorities converter.
+  Keycloak-claims-to-authorities converter. `payment.proto` also defines a
+  second, server-streaming RPC (`WatchPaymentStatus`) that Order Service
+  consumes in the background from an admin-only endpoint; those updates are
+  only logged and kept in memory, not shown here since they never reach the
+  client. See the root [README](../README.md) for details.
 - **Order Service / Payment Service → Keycloak**: both independently validate
   the token's signature against Keycloak's JWKS (via `issuer-uri`); neither
   service trusts the other's validation. See [auth.md](auth.md) for why and

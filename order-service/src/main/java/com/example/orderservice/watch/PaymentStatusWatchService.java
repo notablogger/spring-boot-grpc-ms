@@ -1,0 +1,82 @@
+package com.example.orderservice.watch;
+
+import com.example.grpc.payment.v1.PaymentStatusResponse;
+import com.example.orderservice.client.PaymentStatusClient;
+import com.example.orderservice.exception.OrderNotFoundException;
+import com.example.orderservice.model.PaymentStatusEvent;
+import com.example.orderservice.repository.OrderRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.security.core.context.SecurityContext;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.stereotype.Service;
+
+import java.time.Instant;
+import java.util.Iterator;
+import java.util.concurrent.Executor;
+
+/**
+ * Consumes payment-service's WatchPaymentStatus stream in the background:
+ * every update is logged and recorded in {@link PaymentStatusEventStore}.
+ * Nothing here is relayed back over REST -- this is purely an internal
+ * observation feed, triggered by a dedicated admin-only endpoint
+ * ({@code OrderController.watchPaymentStatus}), separate from the existing
+ * payment-status check.
+ */
+@Service
+public class PaymentStatusWatchService {
+
+    private static final Logger log = LoggerFactory.getLogger(PaymentStatusWatchService.class);
+
+    private final OrderRepository orderRepository;
+    private final PaymentStatusClient paymentStatusClient;
+    private final PaymentStatusEventStore eventStore;
+    private final Executor watchExecutor;
+
+    public PaymentStatusWatchService(
+            OrderRepository orderRepository,
+            PaymentStatusClient paymentStatusClient,
+            PaymentStatusEventStore eventStore,
+            Executor watchExecutor) {
+        this.orderRepository = orderRepository;
+        this.paymentStatusClient = paymentStatusClient;
+        this.eventStore = eventStore;
+        this.watchExecutor = watchExecutor;
+    }
+
+    /**
+     * Validates the order exists synchronously (so a bad order id fails the
+     * request immediately rather than silently in the background), then
+     * fires the watch off. The caller's {@link SecurityContext} is captured
+     * up front and restored on the background thread, since
+     * {@code JwtRelayClientInterceptor} reads it via the thread-local
+     * {@link SecurityContextHolder}, which a fresh background thread
+     * wouldn't otherwise have populated.
+     */
+    public void watchAsync(String orderId) {
+        orderRepository.findByOrderId(orderId).orElseThrow(() -> new OrderNotFoundException(orderId));
+
+        SecurityContext callerContext = SecurityContextHolder.getContext();
+        watchExecutor.execute(() -> {
+            SecurityContextHolder.setContext(callerContext);
+            try {
+                consume(orderId);
+            } catch (Exception e) {
+                log.warn("Watch stream for order {} ended abnormally", orderId, e);
+            } finally {
+                SecurityContextHolder.clearContext();
+            }
+        });
+    }
+
+    private void consume(String orderId) {
+        Iterator<PaymentStatusResponse> updates = paymentStatusClient.watchPaymentStatus(orderId);
+        while (updates.hasNext()) {
+            PaymentStatusResponse update = updates.next();
+            log.info("payment status update: order={} paymentId={} status={}",
+                    update.getOrderId(), update.getPaymentId(), update.getStatus());
+            eventStore.record(new PaymentStatusEvent(
+                    update.getOrderId(), update.getPaymentId(), update.getStatus().name(), Instant.now()));
+        }
+    }
+}

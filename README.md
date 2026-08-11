@@ -128,6 +128,22 @@ it belongs to, including `ORD-1002` (`PENDING`), `ORD-1003` (`FAILED`), and
 [docs/auth.md](docs/auth.md) for the full set of test users and the
 role/ownership rules.
 
+## Watching payment status (admin-only)
+
+Alongside the unary `CheckPaymentStatus` RPC above, `payment.proto` also
+defines a **server-streaming** RPC, `WatchPaymentStatus`: it pushes the
+current status immediately, then (for a still-`PENDING` payment) one further
+update once it settles, before closing the stream. order-service exposes an
+admin-only endpoint that starts consuming this stream in the background —
+each update is only logged and kept in memory (`PaymentStatusEventStore`),
+not relayed back over REST:
+
+```bash
+curl -s -X POST http://localhost:8080/api/v1/orders/ORD-1002/payment-status/watch \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+# 202 Accepted; watch order-service's logs for the PENDING -> COMPLETED updates
+```
+
 ## Testing
 
 ```bash

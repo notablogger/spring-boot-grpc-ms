@@ -1,0 +1,19 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: order-service
+
+grpc:
+  client:
+    payment-service:
+      address: static://localhost:9090
+      negotiation-type: plaintext
+      enable-keep-alive: true
+      keep-alive-time: 30s
+
+logging:
+  level:
+    com.example.orderservice: INFO
+    net.devh.boot.grpc: INFO

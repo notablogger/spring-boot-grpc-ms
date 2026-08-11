@@ -1,0 +1,8 @@
+grpc:
+  client:
+    payment-service:
+      # DNS-based scheme: payment-service's container hostname is resolved by
+      # Docker's embedded DNS. static:// would work too but creates an
+      # unresolved SocketAddress, which grpc-netty's epoll transport (used on
+      # Linux, i.e. inside the container) refuses to connect to.
+      address: dns:///payment-service:9090

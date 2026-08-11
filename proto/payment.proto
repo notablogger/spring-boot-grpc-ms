@@ -1,0 +1,34 @@
+syntax = "proto3";
+
+package payment.v1;
+
+option java_multiple_files = true;
+option java_package = "com.example.grpc.payment.v1";
+
+// PaymentService is implemented by payment-service and consumed by order-service
+// to check the payment status of a previously placed order.
+service PaymentService {
+  // Returns the current payment status for the given order id.
+  // Returns NOT_FOUND (gRPC status) if no payment exists for the order id.
+  rpc CheckPaymentStatus(PaymentStatusRequest) returns (PaymentStatusResponse);
+}
+
+message PaymentStatusRequest {
+  string order_id = 1;
+}
+
+message PaymentStatusResponse {
+  string order_id = 1;
+  string payment_id = 2;
+  PaymentStatus status = 3;
+  double amount = 4;
+  string currency = 5;
+}
+
+enum PaymentStatus {
+  PAYMENT_STATUS_UNSPECIFIED = 0;
+  PENDING = 1;
+  COMPLETED = 2;
+  FAILED = 3;
+  REFUNDED = 4;
+}

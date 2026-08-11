@@ -1,0 +1,30 @@
+[
+  {
+    "orderId": "ORD-1001",
+    "paymentId": "PAY-5001",
+    "status": "COMPLETED",
+    "amount": 129.99,
+    "currency": "USD"
+  },
+  {
+    "orderId": "ORD-1002",
+    "paymentId": "PAY-5002",
+    "status": "PENDING",
+    "amount": 49.50,
+    "currency": "USD"
+  },
+  {
+    "orderId": "ORD-1003",
+    "paymentId": "PAY-5003",
+    "status": "FAILED",
+    "amount": 89.00,
+    "currency": "EUR"
+  },
+  {
+    "orderId": "ORD-1004",
+    "paymentId": "PAY-5004",
+    "status": "REFUNDED",
+    "amount": 15.75,
+    "currency": "USD"
+  }
+]

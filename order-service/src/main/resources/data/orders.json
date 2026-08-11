@@ -1,0 +1,37 @@
+[
+  {
+    "orderId": "ORD-1001",
+    "customerId": "CUST-01",
+    "totalAmount": 129.99,
+    "currency": "USD",
+    "createdAt": "2026-07-01T10:15:30Z"
+  },
+  {
+    "orderId": "ORD-1002",
+    "customerId": "CUST-02",
+    "totalAmount": 49.50,
+    "currency": "USD",
+    "createdAt": "2026-07-03T08:42:00Z"
+  },
+  {
+    "orderId": "ORD-1003",
+    "customerId": "CUST-03",
+    "totalAmount": 89.00,
+    "currency": "EUR",
+    "createdAt": "2026-07-05T14:05:11Z"
+  },
+  {
+    "orderId": "ORD-1004",
+    "customerId": "CUST-01",
+    "totalAmount": 15.75,
+    "currency": "USD",
+    "createdAt": "2026-07-06T19:30:45Z"
+  },
+  {
+    "orderId": "ORD-1005",
+    "customerId": "CUST-04",
+    "totalAmount": 250.00,
+    "currency": "USD",
+    "createdAt": "2026-07-07T09:00:00Z"
+  }
+]

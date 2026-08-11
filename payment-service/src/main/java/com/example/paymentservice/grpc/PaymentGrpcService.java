@@ -7,9 +7,10 @@ import com.example.paymentservice.model.Payment;
 import com.example.paymentservice.repository.PaymentRepository;
 import io.grpc.Status;
 import io.grpc.stub.StreamObserver;
-import net.devh.boot.grpc.server.service.GrpcService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.grpc.server.service.GrpcService;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.util.StringUtils;
 
 /**
@@ -48,6 +49,7 @@ public class PaymentGrpcService extends PaymentServiceGrpc.PaymentServiceImplBas
      * @param request the gRPC request containing the order ID
      * @param responseObserver the stream observer for sending the response or error back to the client
      */
+    @PreAuthorize("hasAnyRole('customer', 'admin')")
     @Override
     public void checkPaymentStatus(PaymentStatusRequest request, StreamObserver<PaymentStatusResponse> responseObserver) {
         String orderId = request.getOrderId();

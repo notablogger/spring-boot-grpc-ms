@@ -7,33 +7,40 @@ plugins {
 description = 'REST API that lets clients check payment status for an order, backed by a gRPC call to payment-service'
 
 ext {
-    grpcVersion = '1.65.1'
-    protobufVersion = '3.25.3'
-    grpcSpringBootStarterVersion = '3.1.0.RELEASE'
+    // Match Spring Boot 4.1's managed versions -- see payment-service/build.gradle
+    // for why these are still needed explicitly (protobuf-gradle-plugin's
+    // codegen-tool coordinates aren't covered by dependency-management).
+    grpcVersion = '1.80.0'
+    protobufVersion = '4.34.2'
 }
 
 dependencies {
-    // Spring Web starter provides REST support (embedded Tomcat + Spring MVC)
-    implementation 'org.springframework.boot:spring-boot-starter-web'
-    // gRPC client starter integrates net.devh gRPC client with Spring Boot
-    implementation "net.devh:grpc-client-spring-boot-starter:${grpcSpringBootStarterVersion}"
+    // spring-boot-starter-web was renamed to spring-boot-starter-webmvc in Spring Boot 4
+    implementation 'org.springframework.boot:spring-boot-starter-webmvc'
+    // gRPC client support: @ImportGrpcClients + stub injection
+    implementation 'org.springframework.boot:spring-boot-starter-grpc-client'
     // Validates incoming REST requests' bearer tokens against Keycloak
     implementation 'org.springframework.boot:spring-boot-starter-oauth2-resource-server'
     implementation 'org.springframework.boot:spring-boot-starter-security'
-
-    // Protobuf-generated message classes used at runtime
-    implementation "io.grpc:grpc-protobuf:${grpcVersion}"
-    // gRPC stub APIs used by client code to invoke RPCs
-    implementation "io.grpc:grpc-stub:${grpcVersion}"
-    // Netty transport (shaded) for gRPC network layer at runtime
-    runtimeOnly "io.grpc:grpc-netty-shaded:${grpcVersion}"
-    // Annotations API required at compile time (provided)
-    compileOnly 'org.apache.tomcat:annotations-api:6.0.53'
+    // spring-boot-starter-webmvc already brings Jackson 3 (spring-boot-starter-jackson)
+    // transitively for REST response serialization. These are for our own,
+    // separate classic-Jackson-2 ObjectMapper usage in InMemoryOrderRepository
+    // (see that class's javadoc for why it can't use Spring's Jackson 3 bean).
+    implementation 'com.fasterxml.jackson.core:jackson-databind'
+    implementation 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310'
 
     // Spring test utilities
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
-    // In-process gRPC test utilities for fast integration tests without a real server
-    testImplementation "io.grpc:grpc-inprocess:${grpcVersion}"
+    // TestRestTemplate moved out of spring-boot-test into its own artifact in
+    // Spring Boot 4; needs @AutoConfigureTestRestTemplate too (see test class).
+    testImplementation 'org.springframework.boot:spring-boot-resttestclient'
+    // spring-boot-resttestclient 4.1.0 doesn't pull this in itself (needed
+    // for RestTemplateBuilder) -- known issue, spring-projects/spring-boot#48588.
+    testImplementation 'org.springframework.boot:spring-boot-restclient'
+    // Not pulled in transitively by the starter; version managed by the
+    // Spring Boot BOM via io.spring.dependency-management. Used directly to
+    // host a plain (Spring-free) in-process fake payment-service in tests.
+    testImplementation 'io.grpc:grpc-inprocess'
 }
 
 sourceSets {

@@ -11,12 +11,12 @@ import io.grpc.stub.MetadataUtils;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.security.oauth2.jwt.BadJwtException;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import java.time.Instant;
 import java.util.List;
@@ -28,30 +28,29 @@ import static org.mockito.Mockito.when;
 
 /**
  * Exercises the real, fully-autoconfigured security interceptor chain (rather
- * than hand-assembling {@code ExceptionTranslatingServerInterceptor} /
- * {@code DefaultAuthenticatingServerInterceptor} / {@code ProviderManager}
- * ourselves, which could silently drift from what {@link GrpcSecurityConfig}
- * actually wires): a real Spring context binds its gRPC server in-process via
- * {@code grpc.server.in-process-name}, going through the same beans
- * production uses. Only {@link JwtDecoder} is mocked, since real token
- * signing/verification is Spring Security's own well-tested code, not ours;
- * everything downstream of {@code decode()} (claims-to-authority mapping,
- * authentication, authorization) is real.
+ * than hand-assembling one ourselves, which could silently drift from what
+ * {@link GrpcSecurityConfig} plus {@code @PreAuthorize} on
+ * {@code PaymentGrpcService} actually wires): a real Spring context binds its
+ * gRPC server in-process via {@code spring.grpc.server.inprocess.name}, going
+ * through the same beans production uses. Only {@link JwtDecoder} is mocked,
+ * since real token signing/verification is Spring Security's own
+ * well-tested code, not ours; everything downstream of {@code decode()}
+ * (claims-to-authority mapping, authentication, authorization) is real.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
 class PaymentServiceSecurityIntegrationTest {
 
     private static final String IN_PROCESS_SERVER_NAME = "payment-service-security-test";
 
-    @MockBean
+    @MockitoBean
     private JwtDecoder jwtDecoder;
 
     private ManagedChannel channel;
 
     @DynamicPropertySource
     static void grpcServerProperties(DynamicPropertyRegistry registry) {
-        registry.add("grpc.server.in-process-name", () -> IN_PROCESS_SERVER_NAME);
-        registry.add("grpc.server.port", () -> -1);
+        registry.add("spring.grpc.server.inprocess.name", () -> IN_PROCESS_SERVER_NAME);
+        registry.add("spring.grpc.server.port", () -> -1);
     }
 
     @AfterEach

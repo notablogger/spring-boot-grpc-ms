@@ -1,7 +1,5 @@
 package com.example.orderservice.repository;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.io.ClassPathResource;
 
@@ -26,8 +24,7 @@ class InMemoryOrderRepositoryTest {
 
     private static OrderRepository createRepository() {
         try {
-            ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
-            return new InMemoryOrderRepository(objectMapper, new ClassPathResource("data/orders.json"));
+            return new InMemoryOrderRepository(new ClassPathResource("data/orders.json"));
         } catch (Exception e) {
             throw new IllegalStateException(e);
         }

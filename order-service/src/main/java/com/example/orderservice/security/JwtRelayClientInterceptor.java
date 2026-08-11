@@ -7,11 +7,9 @@ import io.grpc.ClientInterceptor;
 import io.grpc.ForwardingClientCall;
 import io.grpc.Metadata;
 import io.grpc.MethodDescriptor;
-import net.devh.boot.grpc.client.interceptor.GrpcGlobalClientInterceptor;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
-import org.springframework.stereotype.Component;
 
 import java.util.Optional;
 
@@ -20,9 +18,10 @@ import java.util.Optional;
  * call to payment-service, rather than order-service minting a token of its
  * own. payment-service independently re-validates the same Keycloak-issued
  * token, so both services trust the shared IdP directly.
+ *
+ * <p>Plain {@code ClientInterceptor} (core grpc-java, not Spring-specific) --
+ * registered onto the "payment-service" channel via {@link GrpcClientSecurityConfig}.
  */
-@Component
-@GrpcGlobalClientInterceptor
 public class JwtRelayClientInterceptor implements ClientInterceptor {
 
     private static final Metadata.Key<String> AUTHORIZATION_HEADER =

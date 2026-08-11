@@ -4,6 +4,7 @@ import com.example.grpc.payment.v1.PaymentServiceGrpc;
 import com.example.grpc.payment.v1.PaymentStatus;
 import com.example.grpc.payment.v1.PaymentStatusRequest;
 import com.example.grpc.payment.v1.PaymentStatusResponse;
+import com.example.orderservice.security.JwtRelayClientInterceptor;
 import com.nimbusds.jose.JOSEException;
 import com.nimbusds.jose.JWSAlgorithm;
 import com.nimbusds.jose.JWSHeader;
@@ -12,6 +13,7 @@ import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
 import io.grpc.Context;
 import io.grpc.Contexts;
+import io.grpc.ManagedChannel;
 import io.grpc.Metadata;
 import io.grpc.Server;
 import io.grpc.ServerCall;
@@ -19,16 +21,21 @@ import io.grpc.ServerCallHandler;
 import io.grpc.ServerInterceptor;
 import io.grpc.ServerInterceptors;
 import io.grpc.Status;
+import io.grpc.inprocess.InProcessChannelBuilder;
 import io.grpc.inprocess.InProcessServerBuilder;
 import io.grpc.stub.StreamObserver;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.resttestclient.TestRestTemplate;
+import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureTestRestTemplate;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Primary;
+import org.springframework.grpc.client.ChannelBuilderOptions;
+import org.springframework.grpc.client.GrpcChannelFactory;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
@@ -37,8 +44,6 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 
 import javax.crypto.spec.SecretKeySpec;
 import java.io.IOException;
@@ -53,13 +58,19 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * End-to-end test of order-service's REST layer against a real Spring context.
- * payment-service is replaced with an in-process gRPC server serving canned
- * responses, so no external process is required. Keycloak is likewise
- * replaced: the resource-server JwtDecoder is swapped for a symmetric-key
- * decoder ({@link TestJwtDecoderConfig}) so tokens can be minted locally with
- * a fixed test secret, without needing a running IdP in CI.
+ * payment-service is replaced with a plain (Spring-free) in-process gRPC
+ * server serving canned responses. The client side is rewired via a
+ * {@code @Primary} {@link GrpcChannelFactory} test bean rather than
+ * {@code @AutoConfigureTestGrpcTransport}: that annotation's channel factory
+ * doesn't apply {@code GrpcChannelBuilderCustomizer} beans, which would
+ * silently drop {@link JwtRelayClientInterceptor} and defeat the one thing
+ * this test most needs to prove. Keycloak is likewise replaced: the
+ * resource-server JwtDecoder is swapped for a symmetric-key decoder
+ * ({@link TestJwtDecoderConfig}) so tokens can be minted locally with a fixed
+ * test secret, without needing a running IdP in CI.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@AutoConfigureTestRestTemplate
 class OrderPaymentStatusIntegrationTest {
 
     private static final String IN_PROCESS_SERVER_NAME = "payment-service-test";
@@ -71,11 +82,6 @@ class OrderPaymentStatusIntegrationTest {
 
     @Autowired
     private TestRestTemplate restTemplate;
-
-    @DynamicPropertySource
-    static void grpcClientProperties(DynamicPropertyRegistry registry) {
-        registry.add("grpc.client.payment-service.address", () -> "in-process:" + IN_PROCESS_SERVER_NAME);
-    }
 
     @BeforeAll
     static void startFakePaymentService() throws IOException {
@@ -193,6 +199,33 @@ class OrderPaymentStatusIntegrationTest {
             return NimbusJwtDecoder.withSecretKey(new SecretKeySpec(TEST_KEY_BYTES, "HmacSHA256"))
                     .macAlgorithm(MacAlgorithm.HS256)
                     .build();
+        }
+    }
+
+    @TestConfiguration
+    static class TestGrpcChannelConfig {
+
+        // Routes every channel to the in-process fake server regardless of
+        // the configured target, and -- unlike the framework's own test
+        // channel factory -- applies JwtRelayClientInterceptor directly, so
+        // the relay behaviour under test actually runs.
+        @Bean
+        @Primary
+        GrpcChannelFactory testGrpcChannelFactory() {
+            return new GrpcChannelFactory() {
+                @Override
+                public boolean supports(String target) {
+                    return true;
+                }
+
+                @Override
+                public ManagedChannel createChannel(String target, ChannelBuilderOptions options) {
+                    return InProcessChannelBuilder.forName(IN_PROCESS_SERVER_NAME)
+                            .directExecutor()
+                            .intercept(new JwtRelayClientInterceptor())
+                            .build();
+                }
+            };
         }
     }
 

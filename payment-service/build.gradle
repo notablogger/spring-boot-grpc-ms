@@ -7,33 +7,26 @@ plugins {
 description = 'gRPC server exposing payment status lookups for orders'
 
 ext {
-    grpcVersion = '1.65.1'
-    protobufVersion = '3.25.3'
-    grpcSpringBootStarterVersion = '3.1.0.RELEASE'
+    // These match Spring Boot 4.1's managed versions (io.grpc:* and
+    // com.google.protobuf:*) -- kept explicit here only because the
+    // protobuf-gradle-plugin's codegen-tool coordinates (below) aren't
+    // covered by io.spring.dependency-management, which only manages the
+    // dependencies {} block.
+    grpcVersion = '1.80.0'
+    protobufVersion = '4.34.2'
 }
 
 dependencies {
-    implementation 'org.springframework.boot:spring-boot-starter'
-    implementation "net.devh:grpc-server-spring-boot-starter:${grpcSpringBootStarterVersion}"
-    // Brings spring-security-core (an optional dep of the grpc starter above,
-    // so it must be pulled in explicitly) plus JWT decoding/validation support
-    // used to verify tokens issued by Keycloak.
+    implementation 'org.springframework.boot:spring-boot-starter-grpc-server'
+    // JWT decoding/validation support used to verify tokens issued by Keycloak.
     implementation 'org.springframework.boot:spring-boot-starter-oauth2-resource-server'
-
-    implementation "io.grpc:grpc-protobuf:${grpcVersion}"
-    implementation "io.grpc:grpc-stub:${grpcVersion}"
-    implementation "io.grpc:grpc-services:${grpcVersion}"
-    runtimeOnly "io.grpc:grpc-netty-shaded:${grpcVersion}"
-    compileOnly 'org.apache.tomcat:annotations-api:6.0.53'
 
     implementation 'com.fasterxml.jackson.core:jackson-databind'
 
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
-    // Pinned explicitly: transitively resolved otherwise at 1.63.0 while
-    // grpc-core resolves to 1.65.1 elsewhere on the classpath, and the two
-    // aren't binary compatible (NoSuchMethodError on StatsTraceContext at
-    // runtime) -- needed for the in-process gRPC server used in tests.
-    testImplementation "io.grpc:grpc-inprocess:${grpcVersion}"
+    // Not pulled in transitively by the starter; version managed by the
+    // Spring Boot BOM via io.spring.dependency-management.
+    testImplementation 'io.grpc:grpc-inprocess'
 }
 
 sourceSets {

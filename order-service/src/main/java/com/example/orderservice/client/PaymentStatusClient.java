@@ -8,22 +8,22 @@ import com.example.orderservice.exception.PaymentServiceAuthenticationException;
 import com.example.orderservice.exception.PaymentServiceUnavailableException;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
-import net.devh.boot.grpc.client.inject.GrpcClient;
 import org.springframework.stereotype.Component;
 
 /**
  * Thin wrapper around the generated {@link PaymentServiceGrpc} blocking stub that
- * translates gRPC status codes into order-service domain exceptions.
- *
- * <p>Field injection is used here (rather than constructor injection) because
- * {@code grpc-client-spring-boot-starter} wires {@code @GrpcClient} stubs via a
- * {@code BeanPostProcessor} that runs after construction.
+ * translates gRPC status codes into order-service domain exceptions. The stub
+ * itself is supplied as a bean by {@code @ImportGrpcClients} on
+ * {@link com.example.orderservice.OrderServiceApplication}.
  */
 @Component
 public class PaymentStatusClient {
 
-    @GrpcClient("payment-service")
-    private PaymentServiceGrpc.PaymentServiceBlockingStub paymentServiceStub;
+    private final PaymentServiceGrpc.PaymentServiceBlockingStub paymentServiceStub;
+
+    public PaymentStatusClient(PaymentServiceGrpc.PaymentServiceBlockingStub paymentServiceStub) {
+        this.paymentServiceStub = paymentServiceStub;
+    }
 
     /**
      * Checks the payment status for an order by making a synchronous gRPC call to payment-service.

@@ -64,17 +64,31 @@ spring:
           issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost:8081/realms/spring-grpc}
 ```
 
-payment-service has no `spring-web` on its classpath, so Spring Boot's
-resource-server autoconfiguration (which would otherwise expose a `JwtDecoder`
-bean automatically) never activates there. `GrpcSecurityConfig` builds one
-manually with the same standard `JwtDecoders.fromIssuerLocation(...)` factory
-Spring Boot would have used, then wires it into `net.devh`'s gRPC
-authentication interceptors together with a `GrpcSecurityMetadataSource` +
-`AccessDecisionManager` requiring the `customer` or `admin` authority —
-authentication alone isn't enough, since `net.devh`'s authenticating
-interceptor lets a request with **no** `Authorization` header through
-untouched (it only rejects a *present but invalid* token); the authorization
-layer is what actually enforces "every call must be authenticated".
+payment-service has no `spring-web`/`spring-boot-starter-webmvc` on its
+classpath, so Spring Boot's resource-server autoconfiguration (which would
+otherwise expose a `JwtDecoder` bean automatically) never activates there.
+`GrpcSecurityConfig` builds one manually with the same standard
+`JwtDecoders.fromIssuerLocation(...)` factory Spring Boot would have used.
+
+Both services use Spring Boot 4.1's **native** gRPC support
+(`spring-boot-starter-grpc-server`/`-client`, not the community
+`net.devh` starter) — its `GrpcSecurity` autoconfiguration picks up the same
+`JwtDecoder`/`JwtAuthenticationConverter` beans the REST-side resource server
+would use, and enforcement is a single annotation:
+
+```java
+@PreAuthorize("hasAnyRole('customer', 'admin')")
+@Override
+public void checkPaymentStatus(...) { ... }
+```
+
+on `PaymentGrpcService.checkPaymentStatus` (plus `@EnableMethodSecurity` on
+`GrpcSecurityConfig`). This replaces what used to be a ~90-line hand-wired
+`GrpcAuthenticationReader` / `GrpcSecurityMetadataSource` /
+`AccessDecisionManager` setup under `net.devh` — the native support handles
+authentication *and* the "no `Authorization` header must still be rejected"
+case correctly out of the box, so there's no separate authorization-layer
+workaround needed here.
 
 ## Realm setup
 
@@ -149,11 +163,20 @@ Neither test suite depends on a real Keycloak instance:
   locally with Nimbus JOSE JWT (already transitively on the classpath via
   `spring-security-oauth2-jose`) — no real signing key or network call needed.
 - **payment-service**'s `PaymentServiceSecurityIntegrationTest` binds the gRPC
-  server in-process via `grpc.server.in-process-name`, so the test runs
-  through the *real*, fully-autoconfigured `GrpcSecurityConfig` beans rather
-  than a hand-assembled interceptor chain that could silently drift from
-  production. Only `JwtDecoder.decode(...)` is mocked (via `@MockBean`); real
-  token signature verification is Spring Security's own well-tested code, not
-  ours, so it isn't what these tests are trying to prove.
+  server in-process via `spring.grpc.server.inprocess.name`, so the test runs
+  through the *real*, fully-autoconfigured security beans (`GrpcSecurity` +
+  `@PreAuthorize`) rather than a hand-assembled interceptor chain that could
+  silently drift from production. Only `JwtDecoder.decode(...)` is mocked (via
+  `@MockitoBean`); real token signature verification is Spring Security's own
+  well-tested code, not ours, so it isn't what these tests are trying to
+  prove.
+- **order-service**'s `OrderPaymentStatusIntegrationTest` swaps in a
+  `@Primary GrpcChannelFactory` test bean pointed at a plain, Spring-free
+  in-process fake `payment-service`, rather than the framework's own
+  `@AutoConfigureTestGrpcTransport` — that annotation's test channel factory
+  doesn't apply `GrpcChannelBuilderCustomizer` beans, which would silently
+  drop `JwtRelayClientInterceptor` and defeat the one thing this test most
+  needs to prove (confirmed by inspecting its bytecode after it produced
+  token-less `UNAUTHENTICATED` failures in practice).
 
 Both run as part of `./gradlew build` and the GitHub Actions pipeline.

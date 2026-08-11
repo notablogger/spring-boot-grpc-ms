@@ -37,8 +37,8 @@ flowchart LR
 
 | Container | Responsibility | Technology | Port |
 |---|---|---|---|
-| **Order Service** | Public REST API. Validates the caller's JWT and the order exists, enforces that a `customer` may only see their own orders, then delegates to Payment Service over gRPC to check payment status. | Spring Boot 3, Spring Web, gRPC client (`net.devh:grpc-client-spring-boot-starter`), OAuth2 resource server | `8080` (HTTP) |
-| **Payment Service** | gRPC server. Independently validates the relayed JWT, then looks up payment records by order id. | Spring Boot 3, gRPC server (`net.devh:grpc-server-spring-boot-starter`), OAuth2 resource server | `9090` (gRPC) |
+| **Order Service** | Public REST API. Validates the caller's JWT and the order exists, enforces that a `customer` may only see their own orders, then delegates to Payment Service over gRPC to check payment status. | Spring Boot 4.1, Spring Web MVC, gRPC client (`spring-boot-starter-grpc-client`), OAuth2 resource server | `8080` (HTTP) |
+| **Payment Service** | gRPC server. Independently validates the relayed JWT (`@PreAuthorize`), then looks up payment records by order id. | Spring Boot 4.1, gRPC server (`spring-boot-starter-grpc-server`), OAuth2 resource server | `9090` (gRPC) |
 | **Keycloak** | Shared identity provider both services trust. Issues tokens to clients and exposes the JWKS both services validate against. | Keycloak (Docker), realm `spring-grpc` | `8081` (HTTP, mapped from the container's `8080`) |
 
 ## Relationships

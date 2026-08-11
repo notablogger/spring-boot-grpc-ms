@@ -1,0 +1,75 @@
+plugins {
+    id 'java'
+    id 'org.springframework.boot'
+    id 'com.google.protobuf'
+}
+
+description = 'REST API that lets clients check payment status for an order, backed by a gRPC call to payment-service'
+
+ext {
+    // Match Spring Boot 4.1's managed versions -- see payment-service/build.gradle
+    // for why these are still needed explicitly (protobuf-gradle-plugin's
+    // codegen-tool coordinates aren't covered by dependency-management).
+    grpcVersion = '1.80.0'
+    protobufVersion = '4.34.2'
+}
+
+dependencies {
+    // spring-boot-starter-web was renamed to spring-boot-starter-webmvc in Spring Boot 4
+    implementation 'org.springframework.boot:spring-boot-starter-webmvc'
+    // gRPC client support: @ImportGrpcClients + stub injection
+    implementation 'org.springframework.boot:spring-boot-starter-grpc-client'
+    // Validates incoming REST requests' bearer tokens against Keycloak
+    implementation 'org.springframework.boot:spring-boot-starter-oauth2-resource-server'
+    implementation 'org.springframework.boot:spring-boot-starter-security'
+    // spring-boot-starter-webmvc already brings Jackson 3 (spring-boot-starter-jackson)
+    // transitively for REST response serialization. These are for our own,
+    // separate classic-Jackson-2 ObjectMapper usage in InMemoryOrderRepository
+    // (see that class's javadoc for why it can't use Spring's Jackson 3 bean).
+    implementation 'com.fasterxml.jackson.core:jackson-databind'
+    implementation 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310'
+
+    // Spring test utilities
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    // TestRestTemplate moved out of spring-boot-test into its own artifact in
+    // Spring Boot 4; needs @AutoConfigureTestRestTemplate too (see test class).
+    testImplementation 'org.springframework.boot:spring-boot-resttestclient'
+    // spring-boot-resttestclient 4.1.0 doesn't pull this in itself (needed
+    // for RestTemplateBuilder) -- known issue, spring-projects/spring-boot#48588.
+    testImplementation 'org.springframework.boot:spring-boot-restclient'
+    // Not pulled in transitively by the starter; version managed by the
+    // Spring Boot BOM via io.spring.dependency-management. Used directly to
+    // host a plain (Spring-free) in-process fake payment-service in tests.
+    testImplementation 'io.grpc:grpc-inprocess'
+}
+
+sourceSets {
+    main {
+        proto {
+            srcDir '../proto'
+        }
+    }
+}
+
+protobuf {
+    // Protobuf compiler (protoc) artifact used to generate Java sources from .proto files
+    protoc {
+        artifact = "com.google.protobuf:protoc:${protobufVersion}"
+    }
+    plugins {
+        // gRPC plugin for protoc that generates gRPC Java code (services and stubs)
+        grpc {
+            artifact = "io.grpc:protoc-gen-grpc-java:${grpcVersion}"
+        }
+    }
+    generateProtoTasks {
+        // Configure all proto generation tasks to run the grpc plugin so both
+        // protobuf message classes and gRPC stubs are generated into the
+        // project's source set.
+        all().each { task ->
+            task.plugins {
+                grpc {}
+            }
+        }
+    }
+}

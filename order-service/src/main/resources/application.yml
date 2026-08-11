@@ -4,16 +4,18 @@ server:
 spring:
   application:
     name: order-service
-
-grpc:
-  client:
-    payment-service:
-      address: static://localhost:9090
-      negotiation-type: plaintext
-      enable-keep-alive: true
-      keep-alive-time: 30s
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost:8081/realms/spring-grpc}
+  grpc:
+    client:
+      channel:
+        paymentService:
+          target: static://localhost:9090
 
 logging:
   level:
     com.example.orderservice: INFO
-    net.devh.boot.grpc: INFO
+    org.springframework.grpc: INFO

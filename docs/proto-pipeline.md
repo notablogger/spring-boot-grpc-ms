@@ -19,31 +19,31 @@ spring-grpc/
 
 ## How each module consumes it
 
-Both `order-service/build.gradle.kts` and `payment-service/build.gradle.kts`
+Both `order-service/build.gradle` and `payment-service/build.gradle`
 apply the [`com.google.protobuf`](https://github.com/google/protobuf-gradle-plugin)
 Gradle plugin and point the `main` source set's proto directory at the root
 folder:
 
-```kotlin
+```groovy
 sourceSets {
     main {
         proto {
-            srcDir("../proto")
+            srcDir '../proto'
         }
     }
 }
 
 protobuf {
     protoc {
-        artifact = "com.google.protobuf:protoc:$protobufVersion"
+        artifact = "com.google.protobuf:protoc:${protobufVersion}"
     }
     plugins {
-        create("grpc") {
-            artifact = "io.grpc:protoc-gen-grpc-java:$grpcVersion"
+        grpc {
+            artifact = "io.grpc:protoc-gen-grpc-java:${grpcVersion}"
         }
     }
     generateProtoTasks {
-        all().forEach { task -> task.plugins { create("grpc") } }
+        all().each { task -> task.plugins { grpc {} } }
     }
 }
 ```

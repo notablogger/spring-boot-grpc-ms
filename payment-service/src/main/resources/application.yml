@@ -1,14 +1,20 @@
 spring:
   application:
     name: payment-service
-
-grpc:
-  server:
-    port: 9090
-    health-service-enabled: true
-    reflection-service-enabled: true
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost:8081/realms/spring-grpc}
+  grpc:
+    server:
+      port: 9090
+      health:
+        enabled: true
+      reflection:
+        enabled: true
 
 logging:
   level:
     com.example.paymentservice: INFO
-    net.devh.boot.grpc: INFO
+    org.springframework.grpc: INFO

@@ -1,7 +1,9 @@
 package com.example.orderservice.web;
 
+import com.example.orderservice.exception.OrderAccessDeniedException;
 import com.example.orderservice.exception.OrderNotFoundException;
 import com.example.orderservice.exception.PaymentNotFoundException;
+import com.example.orderservice.exception.PaymentServiceAuthenticationException;
 import com.example.orderservice.exception.PaymentServiceUnavailableException;
 import com.example.orderservice.web.dto.ErrorResponse;
 import jakarta.servlet.http.HttpServletRequest;
@@ -32,6 +34,21 @@ public class GlobalExceptionHandler {
             PaymentServiceUnavailableException ex, HttpServletRequest request) {
         log.warn("payment-service call failed: {}", ex.getMessage(), ex);
         return errorResponse(HttpStatus.SERVICE_UNAVAILABLE, ex, request);
+    }
+
+    @ExceptionHandler(OrderAccessDeniedException.class)
+    public ResponseEntity<ErrorResponse> handleOrderAccessDenied(OrderAccessDeniedException ex, HttpServletRequest request) {
+        return errorResponse(HttpStatus.FORBIDDEN, ex, request);
+    }
+
+    @ExceptionHandler(PaymentServiceAuthenticationException.class)
+    public ResponseEntity<ErrorResponse> handlePaymentServiceAuthentication(
+            PaymentServiceAuthenticationException ex, HttpServletRequest request) {
+        // A persistent misconfiguration (e.g. mismatched Keycloak realms), not a
+        // transient blip, so it's logged at error (not warn) and kept distinct
+        // from the 503 mapping above: retrying will not fix this.
+        log.error("payment-service rejected our relayed token: {}", ex.getMessage(), ex);
+        return errorResponse(HttpStatus.BAD_GATEWAY, ex, request);
     }
 
     private static ResponseEntity<ErrorResponse> errorResponse(

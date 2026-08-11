@@ -4,6 +4,7 @@ import com.example.grpc.payment.v1.PaymentServiceGrpc;
 import com.example.grpc.payment.v1.PaymentStatusRequest;
 import com.example.grpc.payment.v1.PaymentStatusResponse;
 import com.example.orderservice.exception.PaymentNotFoundException;
+import com.example.orderservice.exception.PaymentServiceAuthenticationException;
 import com.example.orderservice.exception.PaymentServiceUnavailableException;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
@@ -40,9 +41,16 @@ public class PaymentStatusClient {
                             .setOrderId(orderId)
                             .build());
         } catch (StatusRuntimeException e) {
+            Status.Code code = e.getStatus().getCode();
             // Translate NOT_FOUND status into domain exception for REST error handling
-            if (e.getStatus().getCode() == Status.Code.NOT_FOUND) {
+            if (code == Status.Code.NOT_FOUND) {
                 throw new PaymentNotFoundException(orderId, e);
+            }
+            // payment-service rejected the relayed token; distinct from a plain
+            // outage since retrying will not fix it (see exception javadoc)
+            if (code == Status.Code.UNAUTHENTICATED || code == Status.Code.PERMISSION_DENIED) {
+                throw new PaymentServiceAuthenticationException(
+                        "payment-service rejected the relayed bearer token for order id '%s'".formatted(orderId), e);
             }
             // All other errors indicate payment-service is unreachable or failed
             throw new PaymentServiceUnavailableException(

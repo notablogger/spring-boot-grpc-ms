@@ -17,6 +17,9 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-web'
     // gRPC client starter integrates net.devh gRPC client with Spring Boot
     implementation "net.devh:grpc-client-spring-boot-starter:${grpcSpringBootStarterVersion}"
+    // Validates incoming REST requests' bearer tokens against Keycloak
+    implementation 'org.springframework.boot:spring-boot-starter-oauth2-resource-server'
+    implementation 'org.springframework.boot:spring-boot-starter-security'
 
     // Protobuf-generated message classes used at runtime
     implementation "io.grpc:grpc-protobuf:${grpcVersion}"

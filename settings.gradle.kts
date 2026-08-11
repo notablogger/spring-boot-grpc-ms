@@ -1,3 +1,0 @@
-rootProject.name = "spring-grpc"
-
-include("order-service", "payment-service")

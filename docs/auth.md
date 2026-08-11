@@ -70,11 +70,11 @@ otherwise expose a `JwtDecoder` bean automatically) never activates there.
 `GrpcSecurityConfig` builds one manually with the same standard
 `JwtDecoders.fromIssuerLocation(...)` factory Spring Boot would have used.
 
-Both services use Spring Boot 4.1's **native** gRPC support
-(`spring-boot-starter-grpc-server`/`-client`, not the community
-`net.devh` starter) — its `GrpcSecurity` autoconfiguration picks up the same
-`JwtDecoder`/`JwtAuthenticationConverter` beans the REST-side resource server
-would use, and enforcement is a single annotation:
+Both services use Spring Boot 4.1's gRPC support
+(`spring-boot-starter-grpc-server`/`-client`) — its `GrpcSecurity`
+autoconfiguration picks up the same `JwtDecoder`/`JwtAuthenticationConverter`
+beans the REST-side resource server would use, and enforcement is a single
+annotation:
 
 ```java
 @PreAuthorize("hasAnyRole('customer', 'admin')")
@@ -83,12 +83,9 @@ public void checkPaymentStatus(...) { ... }
 ```
 
 on `PaymentGrpcService.checkPaymentStatus` (plus `@EnableMethodSecurity` on
-`GrpcSecurityConfig`). This replaces what used to be a ~90-line hand-wired
-`GrpcAuthenticationReader` / `GrpcSecurityMetadataSource` /
-`AccessDecisionManager` setup under `net.devh` — the native support handles
-authentication *and* the "no `Authorization` header must still be rejected"
-case correctly out of the box, so there's no separate authorization-layer
-workaround needed here.
+`GrpcSecurityConfig`). This handles authentication *and* the "no
+`Authorization` header must still be rejected" case correctly out of the box,
+so there's no separate authorization-layer workaround needed here.
 
 ## Realm setup
 

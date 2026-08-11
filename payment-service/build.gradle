@@ -15,6 +15,10 @@ ext {
 dependencies {
     implementation 'org.springframework.boot:spring-boot-starter'
     implementation "net.devh:grpc-server-spring-boot-starter:${grpcSpringBootStarterVersion}"
+    // Brings spring-security-core (an optional dep of the grpc starter above,
+    // so it must be pulled in explicitly) plus JWT decoding/validation support
+    // used to verify tokens issued by Keycloak.
+    implementation 'org.springframework.boot:spring-boot-starter-oauth2-resource-server'
 
     implementation "io.grpc:grpc-protobuf:${grpcVersion}"
     implementation "io.grpc:grpc-stub:${grpcVersion}"

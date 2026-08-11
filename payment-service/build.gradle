@@ -29,6 +29,11 @@ dependencies {
     implementation 'com.fasterxml.jackson.core:jackson-databind'
 
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    // Pinned explicitly: transitively resolved otherwise at 1.63.0 while
+    // grpc-core resolves to 1.65.1 elsewhere on the classpath, and the two
+    // aren't binary compatible (NoSuchMethodError on StatsTraceContext at
+    // runtime) -- needed for the in-process gRPC server used in tests.
+    testImplementation "io.grpc:grpc-inprocess:${grpcVersion}"
 }
 
 sourceSets {

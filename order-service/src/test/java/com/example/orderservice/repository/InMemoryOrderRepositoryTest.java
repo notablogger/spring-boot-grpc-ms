@@ -16,7 +16,7 @@ class InMemoryOrderRepositoryTest {
         var order = repository.findByOrderId("ORD-1001");
 
         assertThat(order).isPresent();
-        assertThat(order.get().customerId()).isEqualTo("CUST-01");
+        assertThat(order.get().customerId()).isEqualTo("cust-01");
     }
 
     @Test

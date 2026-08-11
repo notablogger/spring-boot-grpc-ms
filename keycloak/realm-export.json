@@ -1,0 +1,82 @@
+{
+  "realm": "spring-grpc",
+  "enabled": true,
+  "sslRequired": "none",
+  "roles": {
+    "realm": [
+      {
+        "name": "customer",
+        "description": "Can check payment status for their own orders"
+      },
+      {
+        "name": "admin",
+        "description": "Can check payment status for any order"
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "spring-grpc-app",
+      "enabled": true,
+      "publicClient": true,
+      "protocol": "openid-connect",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "redirectUris": ["*"]
+    }
+  ],
+  "users": [
+    {
+      "username": "cust-01",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "cust-01@example.com",
+      "firstName": "Order",
+      "lastName": "Customer01",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "customer123",
+          "temporary": false
+        }
+      ],
+      "requiredActions": [],
+      "realmRoles": ["customer"]
+    },
+    {
+      "username": "cust-02",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "cust-02@example.com",
+      "firstName": "Order",
+      "lastName": "Customer02",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "customer123",
+          "temporary": false
+        }
+      ],
+      "requiredActions": [],
+      "realmRoles": ["customer"]
+    },
+    {
+      "username": "admin",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "admin@example.com",
+      "firstName": "Order",
+      "lastName": "Admin",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "admin123",
+          "temporary": false
+        }
+      ],
+      "requiredActions": [],
+      "realmRoles": ["admin"]
+    }
+  ]
+}

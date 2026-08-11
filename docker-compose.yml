@@ -1,28 +1,12 @@
 services:
-  payment-service:
-    build:
-      context: .
-      dockerfile: payment-service/Dockerfile
-    container_name: payment-service
-    ports:
-      - "9090:9090"
-    networks:
-      - grpc-net
-
-  order-service:
-    build:
-      context: .
-      dockerfile: order-service/Dockerfile
-    container_name: order-service
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    container_name: keycloak
+    command: start-dev --import-realm
     environment:
-      - SPRING_PROFILES_ACTIVE=docker
+      - KC_BOOTSTRAP_ADMIN_USERNAME=admin
+      - KC_BOOTSTRAP_ADMIN_PASSWORD=admin
     ports:
-      - "8080:8080"
-    depends_on:
-      - payment-service
-    networks:
-      - grpc-net
-
-networks:
-  grpc-net:
-    driver: bridge
+      - "8081:8080"
+    volumes:
+      - ./keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro

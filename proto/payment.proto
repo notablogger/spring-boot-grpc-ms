@@ -13,7 +13,8 @@ service PaymentService {
   rpc CheckPaymentStatus(PaymentStatusRequest) returns (PaymentStatusResponse);
 
   // Server-streaming: pushes the current status immediately, then any
-  // subsequent status changes as they happen, closing the stream once the
+  // subsequent status changes as they happen (pushed by payment-service's
+  // own REST admin API, see docs/auth.md), closing the stream once the
   // payment reaches a terminal state. Returns NOT_FOUND (gRPC status) if no
   // payment exists for the order id.
   rpc WatchPaymentStatus(PaymentStatusRequest) returns (stream PaymentStatusResponse);

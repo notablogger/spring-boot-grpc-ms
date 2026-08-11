@@ -20,10 +20,19 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-grpc-server'
     // JWT decoding/validation support used to verify tokens issued by Keycloak.
     implementation 'org.springframework.boot:spring-boot-starter-oauth2-resource-server'
+    // Admin-only REST API (payment status mutation), separate from the gRPC surface.
+    implementation 'org.springframework.boot:spring-boot-starter-webmvc'
+    implementation 'org.springframework.boot:spring-boot-starter-security'
 
     implementation 'com.fasterxml.jackson.core:jackson-databind'
 
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    // TestRestTemplate moved out of spring-boot-test into its own artifact in
+    // Spring Boot 4; needs @AutoConfigureTestRestTemplate too (see test class).
+    testImplementation 'org.springframework.boot:spring-boot-resttestclient'
+    // spring-boot-resttestclient 4.1.0 doesn't pull this in itself (needed
+    // for RestTemplateBuilder) -- known issue, spring-projects/spring-boot#48588.
+    testImplementation 'org.springframework.boot:spring-boot-restclient'
     // Not pulled in transitively by the starter; version managed by the
     // Spring Boot BOM via io.spring.dependency-management.
     testImplementation 'io.grpc:grpc-inprocess'

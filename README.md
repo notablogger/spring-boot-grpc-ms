@@ -7,7 +7,9 @@ identity provider.
 - **`order-service`** — a Spring Boot REST API. It exposes an endpoint to
   trigger a payment status check for an order id.
 - **`payment-service`** — a Spring Boot gRPC server. It looks up the payment
-  status for an order id and returns it to whoever calls it over gRPC.
+  status for an order id and returns it to whoever calls it over gRPC. It also
+  exposes a small admin-only REST API of its own, to mutate a payment's status
+  directly.
 
 `order-service` is the **gRPC client**, `payment-service` is the **gRPC
 server**. The contract between them is defined once, at the repository root,
@@ -69,7 +71,8 @@ three test users — see [docs/auth.md](docs/auth.md)). Keycloak comes up on
 ./gradlew :order-service:bootRun
 ```
 
-- `payment-service` gRPC server comes up on `localhost:9090`
+- `payment-service` gRPC server comes up on `localhost:9090`, and its own
+  admin REST API on `localhost:8082`
 - `order-service` REST API comes up on `localhost:8080`, and is configured to
   reach `payment-service` at `localhost:9090` and Keycloak at
   `localhost:8081` by default (see each service's `application.yml`).
@@ -132,17 +135,36 @@ role/ownership rules.
 
 Alongside the unary `CheckPaymentStatus` RPC above, `payment.proto` also
 defines a **server-streaming** RPC, `WatchPaymentStatus`: it pushes the
-current status immediately, then (for a still-`PENDING` payment) one further
-update once it settles, before closing the stream. order-service exposes an
-admin-only endpoint that starts consuming this stream in the background —
-each update is only logged and kept in memory (`PaymentStatusEventStore`),
-not relayed back over REST:
+current status immediately, then (for a still-`PENDING` payment) any further
+updates as they happen, before closing the stream once the payment reaches a
+terminal status. order-service exposes an admin-only endpoint that opens this
+stream and consumes it in the background — each update is only logged and
+kept in memory (`PaymentStatusEventStore`), not relayed back over REST:
 
 ```bash
 curl -s -X POST http://localhost:8080/api/v1/orders/ORD-1002/payment-status/watch \
   -H "Authorization: Bearer $ADMIN_TOKEN"
-# 202 Accepted; watch order-service's logs for the PENDING -> COMPLETED updates
+# 202 Accepted; the stream stays open, waiting for a status change
 ```
+
+There's no timer that settles a `PENDING` payment on its own — a real update
+has to happen. That's payment-service's own admin-only REST endpoint, which
+mutates the stored payment and pushes the new value to every open
+`WatchPaymentStatus` stream for that order (via `PaymentWatchRegistry`):
+
+```bash
+curl -s -X PATCH http://localhost:8082/api/v1/payments/ORD-1002/status \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"status":"completed"}'
+# 200 OK with the updated payment; order-service's log picks up the push
+# (PENDING -> COMPLETED) on the stream opened above, live, with no polling
+```
+
+`status` is matched case-insensitively against `PENDING`, `COMPLETED`,
+`FAILED`, `REFUNDED`. This REST call is entirely local to payment-service —
+no gRPC hop is involved in the mutation itself, only in delivering the push
+to whichever watchers happen to be subscribed.
 
 ## Testing
 

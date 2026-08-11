@@ -12,7 +12,16 @@ import io.grpc.inprocess.InProcessChannelBuilder;
 import io.grpc.stub.MetadataUtils;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.resttestclient.TestRestTemplate;
+import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureTestRestTemplate;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.oauth2.jwt.BadJwtException;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
@@ -30,26 +39,29 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.when;
 
 /**
- * Exercises the real, fully-autoconfigured security interceptor chain (rather
- * than hand-assembling one ourselves, which could silently drift from what
- * {@link GrpcSecurityConfig} plus {@code @PreAuthorize} on
- * {@code PaymentGrpcService} actually wires): a real Spring context binds its
- * gRPC server in-process via {@code spring.grpc.server.inprocess.name}, going
- * through the same beans production uses. Only {@link JwtDecoder} is mocked,
- * since real token signing/verification is Spring Security's own
- * well-tested code, not ours; everything downstream of {@code decode()}
- * (claims-to-authority mapping, authentication, authorization) is real.
+ * Exercises the real, fully-autoconfigured security interceptor chains for
+ * both transports (rather than hand-assembling them, which could silently
+ * drift from what {@link GrpcSecurityConfig}/{@link WebSecurityConfig} plus
+ * {@code @PreAuthorize} on {@code PaymentGrpcService} actually wire): a real
+ * Spring context binds its gRPC server in-process via
+ * {@code spring.grpc.server.inprocess.name} and its REST API on a random
+ * port, going through the same beans production uses. Only {@link JwtDecoder}
+ * is mocked (shared by both transports), since real token signing/verification
+ * is Spring Security's own well-tested code, not ours; everything downstream
+ * of {@code decode()} (claims-to-authority mapping, authentication,
+ * authorization) is real.
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE, properties = {
-        // Speeds up watchEmitsTwoUpdatesForPendingPayment() below; production default is PT3S.
-        "payment.watch.simulated-settlement-delay=PT0.1S"
-})
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@AutoConfigureTestRestTemplate
 class PaymentServiceSecurityIntegrationTest {
 
     private static final String IN_PROCESS_SERVER_NAME = "payment-service-security-test";
 
     @MockitoBean
     private JwtDecoder jwtDecoder;
+
+    @Autowired
+    private TestRestTemplate restTemplate;
 
     private ManagedChannel channel;
 
@@ -136,18 +148,75 @@ class PaymentServiceSecurityIntegrationTest {
     }
 
     @Test
-    void watchEmitsTwoUpdatesForPendingPayment() {
-        // ORD-1002 is PENDING in payments.json -- the simulated settlement
-        // (sped up via the class-level @SpringBootTest properties) should
-        // push a second, COMPLETED update before the stream closes.
-        when(jwtDecoder.decode("valid-token")).thenReturn(validJwt("cust-02", "customer"));
-        PaymentServiceGrpc.PaymentServiceBlockingStub stub = stubWithToken("valid-token");
+    void watchEmitsSecondUpdateWhenRestApiChangesStatus() throws InterruptedException {
+        // ORD-1002 is PENDING in payments.json. The real trigger for the
+        // second update is the admin REST endpoint (PaymentStatusController)
+        // pushing through PaymentWatchRegistry -- not a timer.
+        when(jwtDecoder.decode("watch-token")).thenReturn(validJwt("cust-02", "customer"));
+        when(jwtDecoder.decode("admin-token")).thenReturn(validJwt("some-admin", "admin"));
 
+        PaymentServiceGrpc.PaymentServiceBlockingStub stub = stubWithToken("watch-token");
         Iterator<PaymentStatusResponse> updates = stub.watchPaymentStatus(request("ORD-1002"));
 
         assertThat(updates.next().getStatus()).isEqualTo(PaymentStatus.PENDING);
+
+        // Fire the update from a separate thread: the main thread is about
+        // to block on updates.next() waiting for exactly this push, so
+        // issuing the REST call inline here would deadlock.
+        Thread updater = new Thread(() -> patchStatusWithToken("ORD-1002", "completed", "admin-token"));
+        updater.start();
+
         assertThat(updates.next().getStatus()).isEqualTo(PaymentStatus.COMPLETED);
         assertThat(updates.hasNext()).isFalse();
+        updater.join();
+    }
+
+    @Test
+    void restUpdateChangesStatusAndReturnsUpdatedView() {
+        when(jwtDecoder.decode("admin-token")).thenReturn(validJwt("some-admin", "admin"));
+
+        ResponseEntity<String> response = patchStatusWithToken("ORD-1003", "refunded", "admin-token");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody()).contains("\"status\":\"REFUNDED\"");
+    }
+
+    @Test
+    void restUpdateRequiresAdminRole() {
+        when(jwtDecoder.decode("customer-token")).thenReturn(validJwt("cust-01", "customer"));
+
+        ResponseEntity<String> response = patchStatusWithToken("ORD-1001", "completed", "customer-token");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    @Test
+    void restUpdateRejectsCallWithNoToken() {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+
+        ResponseEntity<String> response = restTemplate.exchange("/api/v1/payments/{orderId}/status", HttpMethod.PATCH,
+                new HttpEntity<>("{\"status\":\"completed\"}", headers), String.class, "ORD-1001");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+    }
+
+    @Test
+    void restUpdateReturns404ForUnknownOrder() {
+        when(jwtDecoder.decode("admin-token")).thenReturn(validJwt("some-admin", "admin"));
+
+        ResponseEntity<String> response = patchStatusWithToken("ORD-9999", "completed", "admin-token");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    @Test
+    void restUpdateReturns400ForInvalidStatus() {
+        when(jwtDecoder.decode("admin-token")).thenReturn(validJwt("some-admin", "admin"));
+
+        ResponseEntity<String> response = patchStatusWithToken("ORD-1001", "not-a-status", "admin-token");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
     }
 
     private PaymentServiceGrpc.PaymentServiceBlockingStub stub() {
@@ -159,6 +228,14 @@ class PaymentServiceSecurityIntegrationTest {
         Metadata headers = new Metadata();
         headers.put(Metadata.Key.of("authorization", Metadata.ASCII_STRING_MARSHALLER), "Bearer " + token);
         return stub().withInterceptors(MetadataUtils.newAttachHeadersInterceptor(headers));
+    }
+
+    private ResponseEntity<String> patchStatusWithToken(String orderId, String status, String token) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(token);
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        return restTemplate.exchange("/api/v1/payments/{orderId}/status", HttpMethod.PATCH,
+                new HttpEntity<>("{\"status\":\"%s\"}".formatted(status), headers), String.class, orderId);
     }
 
     private static PaymentStatusRequest request(String orderId) {

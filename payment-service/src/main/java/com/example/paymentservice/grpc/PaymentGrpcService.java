@@ -5,18 +5,15 @@ import com.example.grpc.payment.v1.PaymentStatusRequest;
 import com.example.grpc.payment.v1.PaymentStatusResponse;
 import com.example.paymentservice.model.Payment;
 import com.example.paymentservice.repository.PaymentRepository;
+import com.example.paymentservice.watch.PaymentWatchRegistry;
 import io.grpc.Status;
+import io.grpc.stub.ServerCallStreamObserver;
 import io.grpc.stub.StreamObserver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.grpc.server.service.GrpcService;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.util.StringUtils;
-
-import java.time.Duration;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
 
 /**
  * gRPC endpoint implementation for {@code payment.v1.PaymentService}, backed by
@@ -29,16 +26,11 @@ public class PaymentGrpcService extends PaymentServiceGrpc.PaymentServiceImplBas
     private static final Logger log = LoggerFactory.getLogger(PaymentGrpcService.class);
 
     private final PaymentRepository paymentRepository;
-    private final ScheduledExecutorService watchScheduler;
-    private final Duration simulatedSettlementDelay;
+    private final PaymentWatchRegistry watchRegistry;
 
-    public PaymentGrpcService(
-            PaymentRepository paymentRepository,
-            ScheduledExecutorService watchScheduler,
-            @Value("${payment.watch.simulated-settlement-delay:PT3S}") Duration simulatedSettlementDelay) {
+    public PaymentGrpcService(PaymentRepository paymentRepository, PaymentWatchRegistry watchRegistry) {
         this.paymentRepository = paymentRepository;
-        this.watchScheduler = watchScheduler;
-        this.simulatedSettlementDelay = simulatedSettlementDelay;
+        this.watchRegistry = watchRegistry;
     }
 
     @PreAuthorize("hasAnyRole('customer', 'admin')")
@@ -61,17 +53,16 @@ public class PaymentGrpcService extends PaymentServiceGrpc.PaymentServiceImplBas
             return;
         }
 
-        responseObserver.onNext(toResponse(payment.get()));
+        responseObserver.onNext(PaymentProtoMapper.toResponse(payment.get()));
         responseObserver.onCompleted();
     }
 
     /**
      * Pushes the current status immediately, then -- for a payment still
-     * {@code PENDING} -- one further update once it settles, before closing
-     * the stream. There's no real payment-events source behind this (no
-     * broker, no polling loop), so settlement is simulated with a delayed
-     * callback on {@link #watchScheduler}; a real implementation would
-     * subscribe to genuine status-change events instead.
+     * {@code PENDING} -- registers with {@link PaymentWatchRegistry} to
+     * receive any further update pushed by payment-service's REST admin API
+     * ({@code PaymentStatusController}), and unregisters if the client
+     * cancels the stream first.
      */
     @PreAuthorize("hasAnyRole('customer', 'admin')")
     @Override
@@ -94,39 +85,16 @@ public class PaymentGrpcService extends PaymentServiceGrpc.PaymentServiceImplBas
         }
 
         Payment current = payment.get();
-        responseObserver.onNext(toResponse(current));
+        responseObserver.onNext(PaymentProtoMapper.toResponse(current));
 
         if (current.status() != com.example.paymentservice.model.PaymentStatus.PENDING) {
             responseObserver.onCompleted();
             return;
         }
 
-        log.debug("Order {} is PENDING; scheduling simulated settlement in {}", orderId, simulatedSettlementDelay);
-        watchScheduler.schedule(() -> {
-            Payment settled = new Payment(current.orderId(), current.paymentId(),
-                    com.example.paymentservice.model.PaymentStatus.COMPLETED, current.amount(), current.currency());
-            responseObserver.onNext(toResponse(settled));
-            responseObserver.onCompleted();
-        }, simulatedSettlementDelay.toMillis(), TimeUnit.MILLISECONDS);
-    }
-
-    private static PaymentStatusResponse toResponse(Payment payment) {
-        return PaymentStatusResponse.newBuilder()
-                .setOrderId(payment.orderId())
-                .setPaymentId(payment.paymentId())
-                .setStatus(toProtoStatus(payment.status()))
-                .setAmount(payment.amount().doubleValue())
-                .setCurrency(payment.currency())
-                .build();
-    }
-
-    private static com.example.grpc.payment.v1.PaymentStatus toProtoStatus(
-            com.example.paymentservice.model.PaymentStatus status) {
-        return switch (status) {
-            case PENDING -> com.example.grpc.payment.v1.PaymentStatus.PENDING;
-            case COMPLETED -> com.example.grpc.payment.v1.PaymentStatus.COMPLETED;
-            case FAILED -> com.example.grpc.payment.v1.PaymentStatus.FAILED;
-            case REFUNDED -> com.example.grpc.payment.v1.PaymentStatus.REFUNDED;
-        };
+        watchRegistry.subscribe(orderId, responseObserver);
+        if (responseObserver instanceof ServerCallStreamObserver<PaymentStatusResponse> serverCallStreamObserver) {
+            serverCallStreamObserver.setOnCancelHandler(() -> watchRegistry.unsubscribe(orderId, responseObserver));
+        }
     }
 }

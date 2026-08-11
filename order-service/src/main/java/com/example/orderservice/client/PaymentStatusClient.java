@@ -24,6 +24,14 @@ public class PaymentStatusClient {
     @GrpcClient("payment-service")
     private PaymentServiceGrpc.PaymentServiceBlockingStub paymentServiceStub;
 
+    /**
+     * Checks the payment status for an order by making a synchronous gRPC call to payment-service.
+     *
+     * @param orderId the order ID to check payment status for
+     * @return the payment status response containing payment details and status
+     * @throws PaymentNotFoundException if no payment record exists for the given order ID
+     * @throws PaymentServiceUnavailableException if the gRPC call fails for any reason other than NOT_FOUND
+     */
     public PaymentStatusResponse checkPaymentStatus(String orderId) {
         try {
             return paymentServiceStub.checkPaymentStatus(

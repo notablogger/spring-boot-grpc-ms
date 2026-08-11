@@ -24,10 +24,30 @@ public class PaymentGrpcService extends PaymentServiceGrpc.PaymentServiceImplBas
 
     private final PaymentRepository paymentRepository;
 
+    /**
+     * Creates a new PaymentGrpcService with the given payment repository.
+     *
+     * @param paymentRepository the repository for looking up payments by order ID
+     */
     public PaymentGrpcService(PaymentRepository paymentRepository) {
         this.paymentRepository = paymentRepository;
     }
 
+    /**
+     * Handles incoming gRPC requests to check the payment status for an order.
+     *
+     * <p>This method implements the async gRPC pattern using StreamObserver:
+     * <ul>
+     *   <li>Validates the order ID is not blank</li>
+     *   <li>Queries the repository for a matching payment record</li>
+     *   <li>Returns a PaymentStatusResponse via onNext() if found</li>
+     *   <li>Returns a NOT_FOUND error status if not found</li>
+     *   <li>Always calls onCompleted() or onError() to terminate the stream</li>
+     * </ul>
+     *
+     * @param request the gRPC request containing the order ID
+     * @param responseObserver the stream observer for sending the response or error back to the client
+     */
     @Override
     public void checkPaymentStatus(PaymentStatusRequest request, StreamObserver<PaymentStatusResponse> responseObserver) {
         String orderId = request.getOrderId();
@@ -51,6 +71,12 @@ public class PaymentGrpcService extends PaymentServiceGrpc.PaymentServiceImplBas
         responseObserver.onCompleted();
     }
 
+    /**
+     * Converts a Payment domain object into a gRPC PaymentStatusResponse.
+     *
+     * @param payment the payment domain object to convert
+     * @return a PaymentStatusResponse protobuf message
+     */
     private static PaymentStatusResponse toResponse(Payment payment) {
         return PaymentStatusResponse.newBuilder()
                 .setOrderId(payment.orderId())
@@ -61,6 +87,12 @@ public class PaymentGrpcService extends PaymentServiceGrpc.PaymentServiceImplBas
                 .build();
     }
 
+    /**
+     * Converts a domain PaymentStatus enum to its protobuf equivalent.
+     *
+     * @param status the domain PaymentStatus value
+     * @return the corresponding protobuf PaymentStatus value
+     */
     private static com.example.grpc.payment.v1.PaymentStatus toProtoStatus(
             com.example.paymentservice.model.PaymentStatus status) {
         return switch (status) {

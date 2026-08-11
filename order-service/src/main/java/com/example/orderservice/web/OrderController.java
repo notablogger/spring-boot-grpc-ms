@@ -1,11 +1,13 @@
 package com.example.orderservice.web;
 
+import com.example.orderservice.exception.WatchNotActiveException;
 import com.example.orderservice.service.OrderPaymentStatusService;
 import com.example.orderservice.watch.PaymentStatusWatchService;
 import com.example.orderservice.web.dto.PaymentStatusView;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -48,5 +50,17 @@ public class OrderController {
     @ResponseStatus(HttpStatus.ACCEPTED)
     public void watchPaymentStatus(@PathVariable String orderId) {
         paymentStatusWatchService.watchAsync(orderId);
+    }
+
+    /**
+     * Stops a watch started via {@link #watchPaymentStatus}, if one is still
+     * running for the given order id. Admin-only, same as starting one.
+     */
+    @DeleteMapping("/{orderId}/payment-status/watch")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void cancelWatch(@PathVariable String orderId) {
+        if (!paymentStatusWatchService.cancel(orderId)) {
+            throw new WatchNotActiveException(orderId);
+        }
     }
 }

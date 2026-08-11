@@ -205,6 +205,33 @@ class OrderPaymentStatusIntegrationTest {
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
     }
 
+    @Test
+    void cancelWatchReturns404WhenNoneIsActive() {
+        // ORD-1001's own watch (started by other tests in this class)
+        // completes almost immediately against the fake service below, so an
+        // order id no other test touches is used here to stay deterministic.
+        ResponseEntity<Void> response = deleteWatchWithToken(
+                "/api/v1/orders/ORD-NEVER-WATCHED/payment-status/watch", token("some-admin", "admin"));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    @Test
+    void customerCannotCancelWatch() {
+        ResponseEntity<Void> response = deleteWatchWithToken(
+                "/api/v1/orders/ORD-1001/payment-status/watch", token("cust-01", "customer"));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    @Test
+    void cancelWatchRequiresToken() {
+        ResponseEntity<Void> response = restTemplate.exchange(
+                "/api/v1/orders/ORD-1001/payment-status/watch", HttpMethod.DELETE, HttpEntity.EMPTY, Void.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+    }
+
     private ResponseEntity<String> getWithToken(String path, String token) {
         HttpHeaders headers = new HttpHeaders();
         headers.setBearerAuth(token);
@@ -215,6 +242,12 @@ class OrderPaymentStatusIntegrationTest {
         HttpHeaders headers = new HttpHeaders();
         headers.setBearerAuth(token);
         return restTemplate.exchange(path, HttpMethod.POST, new HttpEntity<>(headers), Void.class);
+    }
+
+    private ResponseEntity<Void> deleteWatchWithToken(String path, String token) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(token);
+        return restTemplate.exchange(path, HttpMethod.DELETE, new HttpEntity<>(headers), Void.class);
     }
 
     private List<PaymentStatusEvent> awaitEvents(String orderId) {

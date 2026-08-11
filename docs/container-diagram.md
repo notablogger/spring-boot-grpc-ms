@@ -55,9 +55,11 @@ flowchart LR
   code beyond the generated stub classes and a small, duplicated
   Keycloak-claims-to-authorities converter. `payment.proto` also defines a
   second, server-streaming RPC (`WatchPaymentStatus`) that Order Service
-  consumes in the background from an admin-only endpoint; those updates are
-  only logged and kept in memory, not shown here since they never reach the
-  client. The stream has no timer behind it — the update it eventually
+  consumes in the background from an admin-only endpoint (also stoppable via
+  a matching admin-only `DELETE`, which interrupts the consuming thread and
+  cancels the RPC); those updates are only logged and kept in memory, not
+  shown here since they never reach the client. The stream has no timer
+  behind it — the update it eventually
   delivers is whatever Payment Service's own admin REST endpoint (below)
   writes, pushed live to every open watcher of that order id via an
   in-memory subscriber registry (`PaymentWatchRegistry`). See the root

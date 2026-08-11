@@ -166,6 +166,22 @@ curl -s -X PATCH http://localhost:8082/api/v1/payments/ORD-1002/status \
 no gRPC hop is involved in the mutation itself, only in delivering the push
 to whichever watchers happen to be subscribed.
 
+A running watch can also be stopped early, before the payment ever settles:
+
+```bash
+curl -s -X DELETE http://localhost:8080/api/v1/orders/ORD-1002/payment-status/watch \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+# 204 No Content if a watch was actually running and got cancelled;
+# 404 Not Found if there was none to cancel
+```
+
+This interrupts the background thread consuming the gRPC stream, which
+cancels the underlying `WatchPaymentStatus` call — payment-service's
+`PaymentWatchRegistry` then has one fewer subscriber for that order, so a
+later status update via the endpoint above no longer reaches order-service
+at all. Starting a new watch for an order that already has one running
+replaces the old one rather than running two in parallel.
+
 ## Testing
 
 ```bash

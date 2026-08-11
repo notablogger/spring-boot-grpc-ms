@@ -5,6 +5,7 @@ import com.example.orderservice.exception.OrderNotFoundException;
 import com.example.orderservice.exception.PaymentNotFoundException;
 import com.example.orderservice.exception.PaymentServiceAuthenticationException;
 import com.example.orderservice.exception.PaymentServiceUnavailableException;
+import com.example.orderservice.exception.WatchNotActiveException;
 import com.example.orderservice.web.dto.ErrorResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
@@ -39,6 +40,11 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(OrderAccessDeniedException.class)
     public ResponseEntity<ErrorResponse> handleOrderAccessDenied(OrderAccessDeniedException ex, HttpServletRequest request) {
         return errorResponse(HttpStatus.FORBIDDEN, ex, request);
+    }
+
+    @ExceptionHandler(WatchNotActiveException.class)
+    public ResponseEntity<ErrorResponse> handleWatchNotActive(WatchNotActiveException ex, HttpServletRequest request) {
+        return errorResponse(HttpStatus.NOT_FOUND, ex, request);
     }
 
     @ExceptionHandler(PaymentServiceAuthenticationException.class)

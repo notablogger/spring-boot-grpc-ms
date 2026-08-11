@@ -85,6 +85,10 @@ class OrderPaymentStatusIntegrationTest {
 
     @BeforeAll
     static void startFakePaymentService() throws IOException {
+        // Records whatever "authorization" header actually arrives on the
+        // fake server, so relaysCallersBearerTokenToPaymentService() below
+        // can assert JwtRelayClientInterceptor really attached the caller's
+        // token rather than just trusting it compiled.
         ServerInterceptor authorizationCapturingInterceptor = new ServerInterceptor() {
             @Override
             public <ReqT, RespT> ServerCall.Listener<ReqT> interceptCall(
@@ -158,6 +162,8 @@ class OrderPaymentStatusIntegrationTest {
 
     @Test
     void relaysCallersBearerTokenToPaymentService() {
+        // The core token-relay guarantee: order-service must forward the
+        // exact same token it validated, not mint or modify one of its own.
         String token = token("cust-01", "customer");
 
         getWithToken("/api/v1/orders/ORD-1001/payment-status", token);
@@ -188,6 +194,10 @@ class OrderPaymentStatusIntegrationTest {
         }
     }
 
+    // Overrides the production JwtDecoder (which points at a real Keycloak
+    // issuer-uri) with a symmetric-key one, so token(...) below can mint
+    // valid tokens locally with a fixed test secret instead of needing a
+    // running IdP.
     @TestConfiguration
     static class TestJwtDecoderConfig {
 
@@ -229,6 +239,12 @@ class OrderPaymentStatusIntegrationTest {
         }
     }
 
+    // Stands in for the real payment-service: only knows about ORD-1001 (with
+    // the same PAY-5001/COMPLETED/129.99/USD values as the real
+    // payments.json fixture, so returnsPaymentStatusForOwnOrder()'s
+    // assertions stay meaningful), and NOT_FOUND for anything else --
+    // including ORD-1005, which exercises the "order exists locally but
+    // payment-service has no record" 404 case.
     private static final class FakePaymentService extends PaymentServiceGrpc.PaymentServiceImplBase {
 
         @Override

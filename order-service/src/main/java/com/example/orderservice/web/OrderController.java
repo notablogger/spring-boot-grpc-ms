@@ -1,5 +1,6 @@
 package com.example.orderservice.web;
 
+import com.example.grpc.payment.v1.PaymentStatus;
 import com.example.orderservice.service.OrderPaymentStatusService;
 import com.example.orderservice.watch.PaymentStatusWatchService;
 import com.example.orderservice.web.dto.PaymentStatusView;
@@ -41,8 +42,9 @@ public class OrderController {
      * Starts watching an order's payment status via payment-service's
      * server-streaming WatchPaymentStatus RPC, which polls up to {@code
      * count} times, {@code intervalSeconds} apart -- both caller-specified,
-     * defaulting to 10 and 10. The watch stops on its own once a terminal
-     * status is observed (see {@link PaymentStatusWatchService}). Updates
+     * defaulting to 10 and 10 -- until the status matches {@code
+     * targetStatus}, which the caller must supply explicitly (there's no
+     * sensible default for "which status are you waiting for"). Updates
      * are only logged and recorded internally -- there's no REST-facing way
      * to read them back. Admin-only (see {@code WebSecurityConfig}); the
      * stream runs in the background, so this returns immediately.
@@ -52,7 +54,8 @@ public class OrderController {
     public void watchPaymentStatus(
             @PathVariable String orderId,
             @RequestParam(defaultValue = "10") int count,
-            @RequestParam(defaultValue = "10") int intervalSeconds) {
-        paymentStatusWatchService.watchAsync(orderId, count, intervalSeconds);
+            @RequestParam(defaultValue = "10") int intervalSeconds,
+            @RequestParam PaymentStatus targetStatus) {
+        paymentStatusWatchService.watchAsync(orderId, count, intervalSeconds, targetStatus);
     }
 }

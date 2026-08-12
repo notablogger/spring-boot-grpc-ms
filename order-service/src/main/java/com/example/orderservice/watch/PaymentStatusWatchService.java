@@ -55,11 +55,12 @@ public class PaymentStatusWatchService {
      * {@link SecurityContextHolder}, which a fresh background thread
      * wouldn't otherwise have populated.
      *
-     * @param watchCount how many times payment-service should poll before
-     *                   giving up on a payment that never settles
+     * @param watchCount      how many times payment-service should poll before
+     *                        giving up on a payment that never settles
      * @param intervalSeconds how long payment-service waits between polls
+     * @param targetStatus
      */
-    public void watchAsync(String orderId, int watchCount, int intervalSeconds) {
+    public void watchAsync(String orderId, int watchCount, int intervalSeconds, PaymentStatus targetStatus) {
         orderRepository.findByOrderId(orderId).orElseThrow(() -> new OrderNotFoundException(orderId));
 
         SecurityContext callerContext = SecurityContextHolder.getContext();
@@ -72,7 +73,7 @@ public class PaymentStatusWatchService {
         watchExecutor.execute(() -> {
             SecurityContextHolder.setContext(callerContext);
             try {
-                consume(orderId, watchCount, intervalSeconds);
+                consume(orderId, watchCount, intervalSeconds,targetStatus);
             } catch (Exception e) {
                 log.warn("Watch stream for order {} ended abnormally", orderId, e);
             } finally {
@@ -81,8 +82,9 @@ public class PaymentStatusWatchService {
         });
     }
 
-    private void consume(String orderId, int watchCount, int intervalSeconds) {
-        Iterator<PaymentStatusResponse> updates = paymentStatusClient.watchPaymentStatus(orderId, watchCount, intervalSeconds);
+    private void consume(String orderId, int watchCount, int intervalSeconds, PaymentStatus targetStatus) {
+        Iterator<PaymentStatusResponse> updates = paymentStatusClient.watchPaymentStatus(orderId, watchCount,
+                intervalSeconds,targetStatus);
         while (updates.hasNext()) {
             PaymentStatusResponse update = updates.next();
             log.info("payment status update: order={} paymentId={} status={}",
@@ -91,7 +93,7 @@ public class PaymentStatusWatchService {
             eventStore.record(new PaymentStatusEvent(
                     update.getOrderId(), update.getPaymentId(), update.getStatus().name(), Instant.now()));
 
-            if (update.getStatus() != PaymentStatus.PENDING) {
+            if (update.getStatus() == targetStatus) {
                 log.info("Ending watch for order {} finished: status={}", orderId, update.getStatus());
                 break;
             }

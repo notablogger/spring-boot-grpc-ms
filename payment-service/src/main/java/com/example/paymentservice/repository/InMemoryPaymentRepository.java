@@ -1,7 +1,7 @@
 package com.example.paymentservice.repository;
 
+import com.example.grpc.payment.v1.PaymentStatus;
 import com.example.paymentservice.model.Payment;
-import com.example.paymentservice.model.PaymentStatus;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Value;

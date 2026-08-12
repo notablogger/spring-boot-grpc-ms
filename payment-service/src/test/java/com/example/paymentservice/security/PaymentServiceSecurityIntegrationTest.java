@@ -126,7 +126,7 @@ class PaymentServiceSecurityIntegrationTest {
     @Test
     void watchRejectsCallWithNoToken() {
         PaymentServiceGrpc.PaymentServiceBlockingStub stub = stub();
-        Iterator<PaymentStatusResponse> updates = stub.watchPaymentStatus(watchRequest("ORD-1001", 3, 1));
+        Iterator<PaymentStatusResponse> updates = stub.watchPaymentStatus(watchRequest("ORD-1001", 3, 1, PaymentStatus.COMPLETED));
 
         assertThatThrownBy(updates::hasNext)
                 .isInstanceOf(StatusRuntimeException.class)
@@ -139,7 +139,7 @@ class PaymentServiceSecurityIntegrationTest {
         when(jwtDecoder.decode("valid-token")).thenReturn(validJwt("cust-01", "customer"));
         PaymentServiceGrpc.PaymentServiceBlockingStub stub = stubWithToken("valid-token");
 
-        Iterator<PaymentStatusResponse> updates = stub.watchPaymentStatus(watchRequest("ORD-1001", 0, 1));
+        Iterator<PaymentStatusResponse> updates = stub.watchPaymentStatus(watchRequest("ORD-1001", 0, 1, PaymentStatus.COMPLETED));
 
         assertThatThrownBy(updates::hasNext)
                 .isInstanceOf(StatusRuntimeException.class)
@@ -149,12 +149,13 @@ class PaymentServiceSecurityIntegrationTest {
 
     @Test
     void watchEmitsSingleUpdateForAlreadySettledPayment() {
-        // ORD-1001 is COMPLETED in payments.json -- already terminal, so the
-        // stream should close after exactly one update regardless of watch_count.
+        // ORD-1001 is already COMPLETED in payments.json, matching the
+        // requested target status, so the stream should close after exactly
+        // one update regardless of watch_count.
         when(jwtDecoder.decode("valid-token")).thenReturn(validJwt("cust-01", "customer"));
         PaymentServiceGrpc.PaymentServiceBlockingStub stub = stubWithToken("valid-token");
 
-        Iterator<PaymentStatusResponse> updates = stub.watchPaymentStatus(watchRequest("ORD-1001", 3, 1));
+        Iterator<PaymentStatusResponse> updates = stub.watchPaymentStatus(watchRequest("ORD-1001", 3, 1, PaymentStatus.COMPLETED));
 
         assertThat(updates.next().getStatus()).isEqualTo(PaymentStatus.COMPLETED);
         assertThat(updates.hasNext()).isFalse();
@@ -170,7 +171,7 @@ class PaymentServiceSecurityIntegrationTest {
         when(jwtDecoder.decode("admin-token")).thenReturn(validJwt("some-admin", "admin"));
 
         PaymentServiceGrpc.PaymentServiceBlockingStub stub = stubWithToken("watch-token");
-        Iterator<PaymentStatusResponse> updates = stub.watchPaymentStatus(watchRequest("ORD-1002", 2, 2));
+        Iterator<PaymentStatusResponse> updates = stub.watchPaymentStatus(watchRequest("ORD-1002", 2, 2, PaymentStatus.COMPLETED));
 
         assertThat(updates.next().getStatus()).isEqualTo(PaymentStatus.PENDING);
 
@@ -257,11 +258,12 @@ class PaymentServiceSecurityIntegrationTest {
         return PaymentStatusRequest.newBuilder().setOrderId(orderId).build();
     }
 
-    private static PaymentStatusRequest watchRequest(String orderId, int watchCount, int intervalSeconds) {
+    private static PaymentStatusRequest watchRequest(String orderId, int watchCount, int intervalSeconds, PaymentStatus targetStatus) {
         return PaymentStatusRequest.newBuilder()
                 .setOrderId(orderId)
                 .setWatchCount(watchCount)
                 .setWatchIntervalSeconds(intervalSeconds)
+                .setTargetStatus(targetStatus)
                 .build();
     }
 

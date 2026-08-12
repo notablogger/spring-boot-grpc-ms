@@ -1,6 +1,7 @@
 package com.example.orderservice.client;
 
 import com.example.grpc.payment.v1.PaymentServiceGrpc;
+import com.example.grpc.payment.v1.PaymentStatus;
 import com.example.grpc.payment.v1.PaymentStatusRequest;
 import com.example.grpc.payment.v1.PaymentStatusResponse;
 import com.example.orderservice.exception.PaymentNotFoundException;
@@ -69,12 +70,14 @@ public class PaymentStatusClient {
      * {@code hasNext()}/{@code next()} to the caller, which is expected to
      * be iterating on a background thread already.
      */
-    public Iterator<PaymentStatusResponse> watchPaymentStatus(String orderId, int watchCount, int intervalSeconds) {
+    public Iterator<PaymentStatusResponse> watchPaymentStatus(String orderId, int watchCount, int intervalSeconds,
+                                                              PaymentStatus targetStatus) {
         return paymentServiceStub.watchPaymentStatus(
                 PaymentStatusRequest.newBuilder()
                         .setOrderId(orderId)
                         .setWatchCount(watchCount)
                         .setWatchIntervalSeconds(intervalSeconds)
+                        .setTargetStatus(targetStatus)
                         .build());
     }
 }

@@ -14,9 +14,11 @@ service PaymentService {
 
   // Server-streaming: re-reads the payment and pushes its current status up
   // to watch_count times, waiting watch_interval_seconds between each push,
-  // closing the stream early if the payment reaches a terminal state. The
-  // caller drives the polling schedule; payment-service holds no state
-  // between pushes -- an update made via the REST admin API (see
+  // closing the stream early once the payment's status equals target_status.
+  // If the payment settles into a different status than target_status, the
+  // stream keeps polling until watch_count runs out rather than stopping
+  // early. The caller drives the polling schedule; payment-service holds no
+  // state between pushes -- an update made via the REST admin API (see
   // docs/auth.md) becomes visible on the watch's next poll, not instantly.
   // Returns NOT_FOUND (gRPC status) if no payment exists for the order id,
   // or INVALID_ARGUMENT if watch_count/watch_interval_seconds aren't positive.
@@ -32,6 +34,8 @@ message PaymentStatusRequest {
   // How long WatchPaymentStatus waits between polls. Ignored by
   // CheckPaymentStatus.
   int32 watch_interval_seconds = 3;
+  // Target payment status to watch for
+  PaymentStatus target_status = 4;
 }
 
 message PaymentStatusResponse {

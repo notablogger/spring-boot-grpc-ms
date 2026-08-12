@@ -59,10 +59,11 @@ flowchart LR
   only logged and kept in memory, not shown here since they never reach the
   client. There's no subscriber registry or push mechanism on Payment
   Service's side: the caller (Order Service) specifies how many times to
-  poll and how long to wait between polls, and Payment Service just
-  re-reads its own storage on that schedule, closing early once the payment
-  reaches a terminal status -- Order Service's own consuming loop stops on
-  the same condition. See the root [README](../README.md) for details.
+  poll, how long to wait between polls, and which status it's waiting for,
+  and Payment Service just re-reads its own storage on that schedule,
+  closing early once the payment's status matches the one Order Service
+  asked for -- Order Service's own consuming loop stops on the same
+  condition. See the root [README](../README.md) for details.
 - **Client (admin) → Payment Service**: a separate, synchronous REST call
   (`PATCH /api/v1/payments/{orderId}/status`) that Order Service is not
   involved in at all — it mutates the stored payment directly and has no

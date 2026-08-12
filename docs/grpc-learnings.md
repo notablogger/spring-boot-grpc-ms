@@ -127,12 +127,20 @@ just "tell whoever's currently watching," gRPC streaming is enough.
    endpoint. Removed because of the two problems above — shared state that
    wasn't thread-safe, and an assumption that only one instance would ever
    run.
-2. **Caller-driven polling** (current): each call to `WatchPaymentStatus`
-   just checks the payment's status, waits, and checks again — up to
-   `watch_count` times, `watch_interval_seconds` apart, set by the caller
-   (order-service). Nothing is shared between the REST write and the gRPC
-   read; a status change becomes visible on the *next* check, not
-   instantly.
+2. **Caller-driven polling**: each call to `WatchPaymentStatus` just checks
+   the payment's status, waits, and checks again — up to `watch_count`
+   times, `watch_interval_seconds` apart, set by the caller (order-service).
+   Nothing is shared between the REST write and the gRPC read; a status
+   change becomes visible on the *next* check, not instantly.
+3. **Caller-chosen target status** (current): instead of stopping at *any*
+   final status, the caller now also says which status it's actually
+   waiting for (`target_status`), and the watch only stops early once the
+   payment reaches exactly that one. Watching for `COMPLETED` on a payment
+   that ends up `FAILED` no longer stops early — it keeps polling, seeing
+   the same unchanged value, until `watch_count` runs out. This trades some
+   wasted polling (if the target status never happens) for letting the
+   caller — not payment-service — decide what "done" means for its own
+   purposes.
 
 The trade: a little latency (up to one interval's delay) in exchange for no
 shared state to get wrong and no assumption about how many servers are
@@ -141,6 +149,20 @@ running.
 A manual "stop watching" endpoint was added on top of that, then removed
 again — once both sides already stopped on their own the moment a payment
 settled, there was nothing left for a manual cancel to actually do.
+
+Around the same time, payment-service dropped its own domain `PaymentStatus`
+enum — a copy of the proto enum, translated back and forth by hand in
+`PaymentProtoMapper.toProtoStatus()` — and switched to using the generated
+proto enum directly in `Payment`, the repository, and the REST controller.
+That removes a translation step that had to be updated by hand every time a
+new status was added to the proto (three were: `AUTHORISED`,
+`PARTIALLY_REFUNDED`, `VOIDED`). The cost is coupling the domain model
+directly to the wire format, which is usually worth avoiding for exactly the
+reason the old domain enum existed in the first place — so the wire contract
+could change without touching internal code. For a payment lifecycle that's
+realistically defined by the proto contract anyway, this is a reasonable
+simplification at this project's size; it's worth revisiting if the domain
+model ever needs to evolve independently of the wire format.
 
 ## Checklist
 

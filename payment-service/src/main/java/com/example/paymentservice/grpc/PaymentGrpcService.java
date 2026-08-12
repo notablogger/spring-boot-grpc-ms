@@ -4,7 +4,6 @@ import com.example.grpc.payment.v1.PaymentServiceGrpc;
 import com.example.grpc.payment.v1.PaymentStatusRequest;
 import com.example.grpc.payment.v1.PaymentStatusResponse;
 import com.example.paymentservice.model.Payment;
-import com.example.paymentservice.model.PaymentStatus;
 import com.example.paymentservice.repository.PaymentRepository;
 import io.grpc.Status;
 import io.grpc.stub.StreamObserver;
@@ -100,7 +99,7 @@ public class PaymentGrpcService extends PaymentServiceGrpc.PaymentServiceImplBas
             Payment current = payment.get();
             responseObserver.onNext(PaymentProtoMapper.toResponse(current));
 
-            if (current.status() != PaymentStatus.PENDING) {
+            if (current.status().equals(request.getTargetStatus())) {
                 responseObserver.onCompleted();
                 return;
             }

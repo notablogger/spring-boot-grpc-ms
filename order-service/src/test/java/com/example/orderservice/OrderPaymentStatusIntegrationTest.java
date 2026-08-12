@@ -178,7 +178,7 @@ class OrderPaymentStatusIntegrationTest {
 
     @Test
     void adminCanTriggerWatchAndEventsAreRecorded() {
-        ResponseEntity<Void> response = postWatchWithToken("/api/v1/orders/ORD-1001/payment-status/watch", token("some-admin", "admin"));
+        ResponseEntity<Void> response = postWatchWithToken("/api/v1/orders/ORD-1001/payment-status/watch?targetStatus=COMPLETED", token("some-admin", "admin"));
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
 
@@ -193,14 +193,14 @@ class OrderPaymentStatusIntegrationTest {
     @Test
     void customerCannotTriggerWatch() {
         // Watching is admin-only, unlike the regular payment-status check.
-        ResponseEntity<Void> response = postWatchWithToken("/api/v1/orders/ORD-1001/payment-status/watch", token("cust-01", "customer"));
+        ResponseEntity<Void> response = postWatchWithToken("/api/v1/orders/ORD-1001/payment-status/watch?targetStatus=COMPLETED", token("cust-01", "customer"));
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
     }
 
     @Test
     void watchReturns404ForUnknownOrder() {
-        ResponseEntity<Void> response = postWatchWithToken("/api/v1/orders/UNKNOWN-ORDER/payment-status/watch", token("some-admin", "admin"));
+        ResponseEntity<Void> response = postWatchWithToken("/api/v1/orders/UNKNOWN-ORDER/payment-status/watch?targetStatus=COMPLETED", token("some-admin", "admin"));
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
     }

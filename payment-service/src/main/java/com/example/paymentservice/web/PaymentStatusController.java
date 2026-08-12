@@ -13,6 +13,9 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.util.Arrays;
+import java.util.stream.Collectors;
+
 /**
  * Admin-only REST endpoint that mutates a payment's status directly (no
  * gRPC hop needed -- same process as {@code PaymentGrpcService}). There is
@@ -43,13 +46,25 @@ public class PaymentStatusController {
     private static PaymentStatus parseStatus(String raw) {
         if (raw != null) {
             try {
-                return PaymentStatus.valueOf(raw.toUpperCase());
+                PaymentStatus status = PaymentStatus.valueOf(raw.toUpperCase());
+                if (status != PaymentStatus.PAYMENT_STATUS_UNSPECIFIED && status != PaymentStatus.UNRECOGNIZED) {
+                    return status;
+                }
             } catch (IllegalArgumentException ignored) {
                 // fall through to the exception below
             }
         }
         throw new ResponseStatusException(
-                HttpStatus.BAD_REQUEST, "status must be one of PENDING, COMPLETED, FAILED, REFUNDED");
+                HttpStatus.BAD_REQUEST, "status must be one of " + validStatusNames());
+    }
+
+    // Built from the enum itself so this can't go stale the next time a
+    // status is added to payment.proto.
+    private static String validStatusNames() {
+        return Arrays.stream(PaymentStatus.values())
+                .filter(status -> status != PaymentStatus.PAYMENT_STATUS_UNSPECIFIED && status != PaymentStatus.UNRECOGNIZED)
+                .map(Enum::name)
+                .collect(Collectors.joining(", "));
     }
 
     private static PaymentStatusView toView(Payment payment) {

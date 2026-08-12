@@ -1,8 +1,7 @@
-package com.example.orderservice.security;
+package com.example.paymentservice.security;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -10,10 +9,9 @@ import org.springframework.security.oauth2.server.resource.authentication.JwtAut
 import org.springframework.security.web.SecurityFilterChain;
 
 /**
- * Every REST call must present a Keycloak-issued JWT with the {@code customer}
- * or {@code admin} realm role. Fine-grained ownership (a customer may only
- * check their own orders) is enforced in {@code OrderPaymentStatusService},
- * since it needs the order data this layer does not have.
+ * payment-service's REST surface is entirely internal/admin (just the one
+ * status-update endpoint) -- unlike order-service, there's no customer
+ * traffic here to distinguish, so every request requires the admin role.
  */
 @Configuration
 @EnableWebSecurity
@@ -30,10 +28,7 @@ public class WebSecurityConfig {
         http
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .authorizeHttpRequests(auth -> auth
-                        // Must precede the general rule below: first-match-wins.
-                        .requestMatchers(HttpMethod.POST, "/api/v1/orders/*/payment-status/watch").hasRole("admin")
-                        .anyRequest().hasAnyRole("customer", "admin"))
+                .authorizeHttpRequests(auth -> auth.anyRequest().hasRole("admin"))
                 .oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter())));
         return http.build();
     }

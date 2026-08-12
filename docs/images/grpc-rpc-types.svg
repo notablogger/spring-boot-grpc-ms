@@ -1,0 +1,26 @@
+<svg width="680" height="370" viewBox="0 0 680 370" xmlns="http://www.w3.org/2000/svg" font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif" role="img">
+<title>The four gRPC RPC shapes</title>
+<desc>A 2x2 grid comparing unary, server-streaming, client-streaming, and bidirectional-streaming RPCs by whether the request and response are a single message or a stream of messages. Unary and server-streaming are highlighted as the two types used in this project.</desc>
+<rect x="0" y="0" width="680" height="370" fill="#FFFFFF"/>
+<g>
+<rect x="40" y="70" width="280" height="100" rx="8" fill="#DBEAFE" stroke="#3B82F6" stroke-width="1.5"/>
+<text x="180" y="102" text-anchor="middle" font-size="14" font-weight="500" fill="#1E3A8A">Unary</text>
+<text x="180" y="124" text-anchor="middle" font-size="12" fill="#1D4ED8">one request, one response</text>
+<text x="180" y="146" text-anchor="middle" font-size="12" fill="#1D4ED8">&#8594; CheckPaymentStatus</text>
+</g>
+<g>
+<rect x="360" y="70" width="280" height="100" rx="8" fill="#DBEAFE" stroke="#3B82F6" stroke-width="1.5"/>
+<text x="500" y="102" text-anchor="middle" font-size="14" font-weight="500" fill="#1E3A8A">Server streaming</text>
+<text x="500" y="124" text-anchor="middle" font-size="12" fill="#1D4ED8">one request, many responses</text>
+<text x="500" y="146" text-anchor="middle" font-size="12" fill="#1D4ED8">&#8594; WatchPaymentStatus</text>
+</g>
+<rect x="40" y="200" width="280" height="100" rx="8" fill="#F3F4F6" stroke="#9CA3AF" stroke-width="1.5"/>
+<text x="180" y="232" text-anchor="middle" font-size="14" font-weight="500" fill="#111827">Client streaming</text>
+<text x="180" y="254" text-anchor="middle" font-size="12" fill="#4B5563">many requests, one response</text>
+<text x="180" y="276" text-anchor="middle" font-size="12" fill="#4B5563">not used here</text>
+<rect x="360" y="200" width="280" height="100" rx="8" fill="#F3F4F6" stroke="#9CA3AF" stroke-width="1.5"/>
+<text x="500" y="232" text-anchor="middle" font-size="14" font-weight="500" fill="#111827">Bidirectional streaming</text>
+<text x="500" y="254" text-anchor="middle" font-size="12" fill="#4B5563">many requests, many responses</text>
+<text x="500" y="276" text-anchor="middle" font-size="12" fill="#4B5563">not used here</text>
+<text x="340" y="330" text-anchor="middle" font-size="12" fill="#6B7280">Blue: the two RPC shapes used in this project's proto</text>
+</svg>

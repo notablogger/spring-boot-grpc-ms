@@ -7,7 +7,9 @@ identity provider.
 - **`order-service`** — a Spring Boot REST API. It exposes an endpoint to
   trigger a payment status check for an order id.
 - **`payment-service`** — a Spring Boot gRPC server. It looks up the payment
-  status for an order id and returns it to whoever calls it over gRPC.
+  status for an order id and returns it to whoever calls it over gRPC. It also
+  exposes a small admin-only REST API of its own, to mutate a payment's status
+  directly.
 
 `order-service` is the **gRPC client**, `payment-service` is the **gRPC
 server**. The contract between them is defined once, at the repository root,
@@ -32,7 +34,7 @@ spring-grpc/
 ├── order-service/             # gRPC client + REST API
 ├── payment-service/           # gRPC server
 ├── keycloak/realm-export.json # pre-configured realm, roles, test users
-├── docs/                      # container diagram, proto pipeline, auth docs
+├── docs/                      # container diagram, proto pipeline, auth, gRPC learnings
 ├── docker-compose.yml         # runs Keycloak only
 └── .github/workflows/ci.yml   # build + test pipeline
 ```
@@ -69,7 +71,8 @@ three test users — see [docs/auth.md](docs/auth.md)). Keycloak comes up on
 ./gradlew :order-service:bootRun
 ```
 
-- `payment-service` gRPC server comes up on `localhost:9090`
+- `payment-service` gRPC server comes up on `localhost:9090`, and its own
+  admin REST API on `localhost:8082`
 - `order-service` REST API comes up on `localhost:8080`, and is configured to
   reach `payment-service` at `localhost:9090` and Keycloak at
   `localhost:8081` by default (see each service's `application.yml`).
@@ -127,6 +130,53 @@ it belongs to, including `ORD-1002` (`PENDING`), `ORD-1003` (`FAILED`), and
 `ORD-1005` (order exists, but no payment record → `404`). See
 [docs/auth.md](docs/auth.md) for the full set of test users and the
 role/ownership rules.
+
+## Watching payment status (admin-only)
+
+Alongside the unary `CheckPaymentStatus` RPC above, `payment.proto` also
+defines a **server-streaming** RPC, `WatchPaymentStatus`. There's no push
+mechanism behind it and no shared state in payment-service: each call is a
+self-contained poll loop that re-reads the payment from storage up to
+`watch_count` times, waiting `watch_interval_seconds` between each read, and
+closes early the moment the payment reaches a terminal status. order-service
+exposes an admin-only endpoint that opens this stream and consumes it in the
+background — each update is only logged and kept in memory
+(`PaymentStatusEventStore`), not relayed back over REST. The caller decides
+the schedule (defaulting to 10 polls, 10 seconds apart):
+
+```bash
+curl -s -X POST "http://localhost:8080/api/v1/orders/ORD-1002/payment-status/watch?count=5&intervalSeconds=3" \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+# 202 Accepted; payment-service will poll up to 5 times, 3 seconds apart
+```
+
+Status changes still happen manually, via payment-service's own admin-only
+REST endpoint, which mutates the stored payment directly:
+
+```bash
+curl -s -X PATCH http://localhost:8082/api/v1/payments/ORD-1002/status \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"status":"completed"}'
+# 200 OK with the updated payment
+```
+
+`status` is matched case-insensitively against `PENDING`, `COMPLETED`,
+`FAILED`, `REFUNDED`. This REST call doesn't know or care whether anything is
+watching — it just writes. A watch only sees the change on its *next* poll,
+so there can be up to `intervalSeconds` of latency between the `PATCH` and
+order-service's log picking it up; there's no live push.
+
+A watch stops on its own as soon as a terminal status is observed —
+payment-service closes the stream server-side, and order-service's
+consuming loop also stops locally on the same condition — rather than
+running for its full `count` regardless. There's no way to cancel a watch
+early from the outside; each call to the watch endpoint starts an
+independent background task, so watching the same order twice runs two
+loops concurrently rather than replacing one with the other.
+
+See [docs/grpc-learnings.md](docs/grpc-learnings.md) for the gRPC concepts
+and trade-offs behind this design.
 
 ## Testing
 

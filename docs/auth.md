@@ -64,11 +64,15 @@ spring:
           issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost:8081/realms/spring-grpc}
 ```
 
-payment-service has no `spring-web`/`spring-boot-starter-webmvc` on its
-classpath, so Spring Boot's resource-server autoconfiguration (which would
-otherwise expose a `JwtDecoder` bean automatically) never activates there.
-`GrpcSecurityConfig` builds one manually with the same standard
-`JwtDecoders.fromIssuerLocation(...)` factory Spring Boot would have used.
+payment-service now also carries `spring-boot-starter-webmvc` (for its own
+admin REST API, below), but `GrpcSecurityConfig` still builds the
+`JwtDecoder` bean manually with the standard
+`JwtDecoders.fromIssuerLocation(...)` factory rather than relying on Spring
+Boot's resource-server autoconfiguration. This keeps the gRPC security setup
+self-contained and independent of whether a web starter happens to be
+present — `WebSecurityConfig` (the REST side, see below) picks up the same
+bean via normal dependency injection, so there's exactly one `JwtDecoder` in
+the context either way.
 
 Both services use Spring Boot 4.1's gRPC support
 (`spring-boot-starter-grpc-server`/`-client`) — its `GrpcSecurity`
@@ -86,6 +90,30 @@ on `PaymentGrpcService.checkPaymentStatus` (plus `@EnableMethodSecurity` on
 `GrpcSecurityConfig`). This handles authentication *and* the "no
 `Authorization` header must still be rejected" case correctly out of the box,
 so there's no separate authorization-layer workaround needed here.
+
+## payment-service's admin REST API
+
+Unlike the gRPC surface (open to `customer` and `admin` alike, subject to
+order-ownership rules enforced upstream in order-service), payment-service's
+own REST API — `PATCH /api/v1/payments/{orderId}/status`, which mutates a
+payment's stored status directly — is gated entirely to the `admin` role,
+with no per-order ownership concept at all. This endpoint doesn't push
+anything anywhere; an open `WatchPaymentStatus` stream only sees the change
+on its next poll (see the root [README](../README.md) for how that polling
+schedule works):
+
+```java
+.authorizeHttpRequests(auth -> auth.anyRequest().hasRole("admin"))
+```
+
+in [`WebSecurityConfig`](../payment-service/src/main/java/com/example/paymentservice/security/WebSecurityConfig.java).
+This is the standard `HttpSecurity`-based Spring Security resource-server
+setup — the same shape as order-service's own `WebSecurityConfig`, just with
+a single blanket rule instead of a route-by-route one, since this REST
+surface has no customer-facing traffic to distinguish. It reuses the same
+`JwtDecoder`/`KeycloakRealmRoleConverter` beans `GrpcSecurityConfig` already
+provides, so a token is validated identically regardless of which transport
+(gRPC or REST) it arrives on.
 
 ## Realm setup
 

@@ -4,6 +4,7 @@ import com.example.grpc.payment.v1.PaymentServiceGrpc;
 import com.example.grpc.payment.v1.PaymentStatusRequest;
 import com.example.grpc.payment.v1.PaymentStatusResponse;
 import com.example.paymentservice.model.Payment;
+import com.example.paymentservice.model.PaymentStatus;
 import com.example.paymentservice.repository.PaymentRepository;
 import io.grpc.Status;
 import io.grpc.stub.StreamObserver;
@@ -12,6 +13,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.grpc.server.service.GrpcService;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.util.StringUtils;
+
+import java.time.Duration;
+import java.util.Optional;
 
 /**
  * gRPC endpoint implementation for {@code payment.v1.PaymentService}, backed by
@@ -25,35 +29,14 @@ public class PaymentGrpcService extends PaymentServiceGrpc.PaymentServiceImplBas
 
     private final PaymentRepository paymentRepository;
 
-    /**
-     * Creates a new PaymentGrpcService with the given payment repository.
-     *
-     * @param paymentRepository the repository for looking up payments by order ID
-     */
     public PaymentGrpcService(PaymentRepository paymentRepository) {
         this.paymentRepository = paymentRepository;
     }
 
-    /**
-     * Handles incoming gRPC requests to check the payment status for an order.
-     *
-     * <p>This method implements the async gRPC pattern using StreamObserver:
-     * <ul>
-     *   <li>Validates the order ID is not blank</li>
-     *   <li>Queries the repository for a matching payment record</li>
-     *   <li>Returns a PaymentStatusResponse via onNext() if found</li>
-     *   <li>Returns a NOT_FOUND error status if not found</li>
-     *   <li>Always calls onCompleted() or onError() to terminate the stream</li>
-     * </ul>
-     *
-     * @param request the gRPC request containing the order ID
-     * @param responseObserver the stream observer for sending the response or error back to the client
-     */
     @PreAuthorize("hasAnyRole('customer', 'admin')")
     @Override
     public void checkPaymentStatus(PaymentStatusRequest request, StreamObserver<PaymentStatusResponse> responseObserver) {
         String orderId = request.getOrderId();
-        // Validate that order ID is not blank
         if (!StringUtils.hasText(orderId)) {
             responseObserver.onError(Status.INVALID_ARGUMENT
                     .withDescription("order_id must not be blank")
@@ -61,10 +44,8 @@ public class PaymentGrpcService extends PaymentServiceGrpc.PaymentServiceImplBas
             return;
         }
 
-        // Query repository for payment record by order ID
         var payment = paymentRepository.findByOrderId(orderId);
         if (payment.isEmpty()) {
-            // No payment found for this order
             log.debug("No payment found for order id {}", orderId);
             responseObserver.onError(Status.NOT_FOUND
                     .withDescription("No payment found for order id '%s'".formatted(orderId))
@@ -72,42 +53,71 @@ public class PaymentGrpcService extends PaymentServiceGrpc.PaymentServiceImplBas
             return;
         }
 
-        // Send successful response and complete the stream
-        responseObserver.onNext(toResponse(payment.get()));
+        responseObserver.onNext(PaymentProtoMapper.toResponse(payment.get()));
         responseObserver.onCompleted();
     }
 
     /**
-     * Converts a Payment domain object into a gRPC PaymentStatusResponse.
-     *
-     * @param payment the payment domain object to convert
-     * @return a PaymentStatusResponse protobuf message
+     * Polls the current status up to {@code watch_count} times, waiting
+     * {@code watch_interval_seconds} between pushes, closing the stream
+     * early once the payment reaches a terminal state. There is no shared
+     * subscriber registry: each call independently re-reads {@link
+     * PaymentRepository} on every iteration, so a change made via the REST
+     * admin API ({@code PaymentStatusController}) becomes visible on the
+     * next poll rather than being pushed live. The caller (order-service)
+     * chooses the schedule via the request.
      */
-    private static PaymentStatusResponse toResponse(Payment payment) {
-        // Convert domain Payment object to protobuf response message
-        return PaymentStatusResponse.newBuilder()
-                .setOrderId(payment.orderId())
-                .setPaymentId(payment.paymentId())
-                .setStatus(toProtoStatus(payment.status()))
-                .setAmount(payment.amount().doubleValue())
-                .setCurrency(payment.currency())
-                .build();
-    }
+    @PreAuthorize("hasAnyRole('customer', 'admin')")
+    @Override
+    public void watchPaymentStatus(PaymentStatusRequest request, StreamObserver<PaymentStatusResponse> responseObserver) {
+        String orderId = request.getOrderId();
+        if (!StringUtils.hasText(orderId)) {
+            responseObserver.onError(Status.INVALID_ARGUMENT
+                    .withDescription("order_id must not be blank")
+                    .asRuntimeException());
+            return;
+        }
 
-    /**
-     * Converts a domain PaymentStatus enum to its protobuf equivalent.
-     *
-     * @param status the domain PaymentStatus value
-     * @return the corresponding protobuf PaymentStatus value
-     */
-    private static com.example.grpc.payment.v1.PaymentStatus toProtoStatus(
-            com.example.paymentservice.model.PaymentStatus status) {
-        // Map domain enum to protobuf enum
-        return switch (status) {
-            case PENDING -> com.example.grpc.payment.v1.PaymentStatus.PENDING;
-            case COMPLETED -> com.example.grpc.payment.v1.PaymentStatus.COMPLETED;
-            case FAILED -> com.example.grpc.payment.v1.PaymentStatus.FAILED;
-            case REFUNDED -> com.example.grpc.payment.v1.PaymentStatus.REFUNDED;
-        };
+        int watchCount = request.getWatchCount();
+        int intervalSeconds = request.getWatchIntervalSeconds();
+        if (watchCount < 1 || intervalSeconds < 1) {
+            responseObserver.onError(Status.INVALID_ARGUMENT
+                    .withDescription("watch_count and watch_interval_seconds must both be positive")
+                    .asRuntimeException());
+            return;
+        }
+
+        for (int attempt = 0; attempt < watchCount; attempt++) {
+            Optional<Payment> payment = paymentRepository.findByOrderId(orderId);
+            if (payment.isEmpty()) {
+                log.debug("No payment found for order id {}", orderId);
+                responseObserver.onError(Status.NOT_FOUND
+                        .withDescription("No payment found for order id '%s'".formatted(orderId))
+                        .asRuntimeException());
+                return;
+            }
+
+            Payment current = payment.get();
+            responseObserver.onNext(PaymentProtoMapper.toResponse(current));
+
+            if (current.status() != PaymentStatus.PENDING) {
+                responseObserver.onCompleted();
+                return;
+            }
+
+            boolean lastAttempt = attempt == watchCount - 1;
+            if (!lastAttempt) {
+                try {
+                    Thread.sleep(Duration.ofSeconds(intervalSeconds));
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    log.info("Watch for order {} interrupted while waiting for next poll", orderId);
+                    return;
+                }
+            }
+        }
+
+        // Still PENDING after watch_count polls -- give up rather than wait forever.
+        responseObserver.onCompleted();
     }
 }

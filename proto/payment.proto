@@ -11,10 +11,27 @@ service PaymentService {
   // Returns the current payment status for the given order id.
   // Returns NOT_FOUND (gRPC status) if no payment exists for the order id.
   rpc CheckPaymentStatus(PaymentStatusRequest) returns (PaymentStatusResponse);
+
+  // Server-streaming: re-reads the payment and pushes its current status up
+  // to watch_count times, waiting watch_interval_seconds between each push,
+  // closing the stream early if the payment reaches a terminal state. The
+  // caller drives the polling schedule; payment-service holds no state
+  // between pushes -- an update made via the REST admin API (see
+  // docs/auth.md) becomes visible on the watch's next poll, not instantly.
+  // Returns NOT_FOUND (gRPC status) if no payment exists for the order id,
+  // or INVALID_ARGUMENT if watch_count/watch_interval_seconds aren't positive.
+  rpc WatchPaymentStatus(PaymentStatusRequest) returns (stream PaymentStatusResponse);
 }
 
 message PaymentStatusRequest {
   string order_id = 1;
+  // How many times WatchPaymentStatus polls the current status before
+  // giving up if the payment never reaches a terminal state. Ignored by
+  // CheckPaymentStatus.
+  int32 watch_count = 2;
+  // How long WatchPaymentStatus waits between polls. Ignored by
+  // CheckPaymentStatus.
+  int32 watch_interval_seconds = 3;
 }
 
 message PaymentStatusResponse {
@@ -31,4 +48,7 @@ enum PaymentStatus {
   COMPLETED = 2;
   FAILED = 3;
   REFUNDED = 4;
+  AUTHORISED = 5;
+  PARTIALLY_REFUNDED = 6;
+  VOIDED = 7;
 }

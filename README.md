@@ -138,17 +138,26 @@ defines a **server-streaming** RPC, `WatchPaymentStatus`. There's no push
 mechanism behind it and no shared state in payment-service: each call is a
 self-contained poll loop that re-reads the payment from storage up to
 `watch_count` times, waiting `watch_interval_seconds` between each read, and
-closes early the moment the payment reaches a terminal status. order-service
-exposes an admin-only endpoint that opens this stream and consumes it in the
-background — each update is only logged and kept in memory
-(`PaymentStatusEventStore`), not relayed back over REST. The caller decides
-the schedule (defaulting to 10 polls, 10 seconds apart):
+closes early once the payment's status matches a **target status the caller
+asks for**. order-service exposes an admin-only endpoint that opens this
+stream and consumes it in the background — each update is only logged and
+kept in memory (`PaymentStatusEventStore`), not relayed back over REST. The
+caller decides the schedule and the target status (the schedule defaults to
+10 polls, 10 seconds apart; there's no default target status, it must be
+supplied):
 
 ```bash
-curl -s -X POST "http://localhost:8080/api/v1/orders/ORD-1002/payment-status/watch?count=5&intervalSeconds=3" \
+curl -s -X POST "http://localhost:8080/api/v1/orders/ORD-1002/payment-status/watch?count=5&intervalSeconds=3&targetStatus=COMPLETED" \
   -H "Authorization: Bearer $ADMIN_TOKEN"
-# 202 Accepted; payment-service will poll up to 5 times, 3 seconds apart
+# 202 Accepted; payment-service will poll up to 5 times, 3 seconds apart,
+# stopping early only if the status becomes COMPLETED
 ```
+
+If the payment settles into a *different* status than the one requested —
+say it watches for `COMPLETED` but the payment is actually `FAILED` — the
+watch does **not** stop early. It keeps polling, seeing the same unchanging
+`FAILED` value each time, until `watch_count` runs out. Pick the target
+status you actually expect, or a generous `watch_count`, accordingly.
 
 Status changes still happen manually, via payment-service's own admin-only
 REST endpoint, which mutates the stored payment directly:
@@ -161,13 +170,15 @@ curl -s -X PATCH http://localhost:8082/api/v1/payments/ORD-1002/status \
 # 200 OK with the updated payment
 ```
 
-`status` is matched case-insensitively against `PENDING`, `COMPLETED`,
-`FAILED`, `REFUNDED`. This REST call doesn't know or care whether anything is
-watching — it just writes. A watch only sees the change on its *next* poll,
-so there can be up to `intervalSeconds` of latency between the `PATCH` and
-order-service's log picking it up; there's no live push.
+`status` is matched case-insensitively against the `PaymentStatus` enum
+values in `payment.proto` — currently `PENDING`, `COMPLETED`, `FAILED`,
+`REFUNDED`, `AUTHORISED`, `PARTIALLY_REFUNDED`, `VOIDED`. This REST call
+doesn't know or care whether anything is watching — it just writes. A watch
+only sees the change on its *next* poll, so there can be up to
+`intervalSeconds` of latency between the `PATCH` and order-service's log
+picking it up; there's no live push.
 
-A watch stops on its own as soon as a terminal status is observed —
+A watch stops on its own once the payment's status equals `targetStatus` —
 payment-service closes the stream server-side, and order-service's
 consuming loop also stops locally on the same condition — rather than
 running for its full `count` regardless. There's no way to cancel a watch

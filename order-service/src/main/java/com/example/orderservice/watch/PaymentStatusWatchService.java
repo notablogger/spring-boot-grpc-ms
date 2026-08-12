@@ -81,6 +81,7 @@ public class PaymentStatusWatchService {
             PaymentStatusResponse update = updates.next();
             log.info("payment status update: order={} paymentId={} status={}",
                     update.getOrderId(), update.getPaymentId(), update.getStatus());
+            //this is needed for tests to check if thee status has indeed arrived from payment service
             eventStore.record(new PaymentStatusEvent(
                     update.getOrderId(), update.getPaymentId(), update.getStatus().name(), Instant.now()));
 

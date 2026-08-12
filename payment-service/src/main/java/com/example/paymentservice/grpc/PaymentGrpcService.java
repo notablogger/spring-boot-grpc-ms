@@ -6,7 +6,6 @@ import com.example.grpc.payment.v1.PaymentStatusResponse;
 import com.example.paymentservice.model.Payment;
 import com.example.paymentservice.repository.PaymentRepository;
 import io.grpc.Status;
-import io.grpc.stub.ServerCallStreamObserver;
 import io.grpc.stub.StreamObserver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -87,14 +86,6 @@ public class PaymentGrpcService extends PaymentServiceGrpc.PaymentServiceImplBas
             return;
         }
 
-        // Interrupting this thread is how a client-initiated cancel breaks
-        // us out of the sleep below promptly, instead of waiting out the
-        // rest of the interval before noticing the call is already dead.
-        Thread watchThread = Thread.currentThread();
-        if (responseObserver instanceof ServerCallStreamObserver<PaymentStatusResponse> serverCallStreamObserver) {
-            serverCallStreamObserver.setOnCancelHandler(watchThread::interrupt);
-        }
-
         for (int attempt = 0; attempt < watchCount; attempt++) {
             Optional<Payment> payment = paymentRepository.findByOrderId(orderId);
             if (payment.isEmpty()) {
@@ -119,7 +110,7 @@ public class PaymentGrpcService extends PaymentServiceGrpc.PaymentServiceImplBas
                     Thread.sleep(Duration.ofSeconds(intervalSeconds));
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
-                    log.info("Watch for order {} cancelled", orderId);
+                    log.info("Watch for order {} interrupted while waiting for next poll", orderId);
                     return;
                 }
             }

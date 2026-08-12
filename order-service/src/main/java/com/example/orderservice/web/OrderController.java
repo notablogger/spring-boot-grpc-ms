@@ -1,13 +1,11 @@
 package com.example.orderservice.web;
 
-import com.example.orderservice.exception.WatchNotActiveException;
 import com.example.orderservice.service.OrderPaymentStatusService;
 import com.example.orderservice.watch.PaymentStatusWatchService;
 import com.example.orderservice.web.dto.PaymentStatusView;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
-import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -43,11 +41,11 @@ public class OrderController {
      * Starts watching an order's payment status via payment-service's
      * server-streaming WatchPaymentStatus RPC, which polls up to {@code
      * count} times, {@code intervalSeconds} apart -- both caller-specified,
-     * defaulting to 10 and 10. Updates are only logged and recorded
-     * internally (see {@link PaymentStatusWatchService}) -- there's no
-     * REST-facing way to read them back. Admin-only (see
-     * {@code WebSecurityConfig}); the stream runs in the background, so this
-     * returns immediately.
+     * defaulting to 10 and 10. The watch stops on its own once a terminal
+     * status is observed (see {@link PaymentStatusWatchService}). Updates
+     * are only logged and recorded internally -- there's no REST-facing way
+     * to read them back. Admin-only (see {@code WebSecurityConfig}); the
+     * stream runs in the background, so this returns immediately.
      */
     @PostMapping("/{orderId}/payment-status/watch")
     @ResponseStatus(HttpStatus.ACCEPTED)
@@ -56,17 +54,5 @@ public class OrderController {
             @RequestParam(defaultValue = "10") int count,
             @RequestParam(defaultValue = "10") int intervalSeconds) {
         paymentStatusWatchService.watchAsync(orderId, count, intervalSeconds);
-    }
-
-    /**
-     * Stops a watch started via {@link #watchPaymentStatus}, if one is still
-     * running for the given order id. Admin-only, same as starting one.
-     */
-    @DeleteMapping("/{orderId}/payment-status/watch")
-    @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void cancelWatch(@PathVariable String orderId) {
-        if (!paymentStatusWatchService.cancel(orderId)) {
-            throw new WatchNotActiveException(orderId);
-        }
     }
 }

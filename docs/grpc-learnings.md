@@ -32,8 +32,13 @@ without extra configuration:
 
 - **Explicit cancel**: interrupting the thread blocked in a blocking-stub
   iterator is grpc-java's documented way to cancel a call from another
-  thread. The server observes this via
-  `ServerCallStreamObserver.setOnCancelHandler(...)`.
+  thread; the server can observe this via
+  `ServerCallStreamObserver.setOnCancelHandler(...)`. This project doesn't
+  use either side of that mechanism — `WatchPaymentStatus` has no external
+  way to be cancelled early. Both sides independently reach the same
+  conclusion instead: payment-service closes the stream once it reads a
+  terminal status, and order-service's consuming loop stops on the same
+  condition, without either one signaling the other.
 - **Terminal completion**: the server calls `onCompleted()`.
 - **Process crash**: the OS closes the TCP connection, which grpc-java
   reports as a cancellation (server side) or `UNAVAILABLE`/`UNKNOWN` (client
@@ -112,6 +117,12 @@ require a dedicated live connection back to the producer.
 The trade made was latency (up to one interval, instead of immediate) for
 simplicity (no registry, no cross-thread `StreamObserver` access, no
 per-instance assumption).
+
+A manual cancel endpoint (order-service `DELETE .../watch`, backed by
+interrupting the consuming thread and a matching
+`setOnCancelHandler` on payment-service) was added, then removed once both
+sides already stopped on their own whenever a terminal status appeared --
+the explicit cancel path had no case left to handle.
 
 ## Checklist
 

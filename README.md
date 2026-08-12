@@ -167,20 +167,13 @@ watching — it just writes. A watch only sees the change on its *next* poll,
 so there can be up to `intervalSeconds` of latency between the `PATCH` and
 order-service's log picking it up; there's no live push.
 
-A running watch can also be stopped early, before it reaches its last poll:
-
-```bash
-curl -s -X DELETE http://localhost:8080/api/v1/orders/ORD-1002/payment-status/watch \
-  -H "Authorization: Bearer $ADMIN_TOKEN"
-# 204 No Content if a watch was actually running and got cancelled;
-# 404 Not Found if there was none to cancel
-```
-
-This interrupts the background thread consuming the gRPC stream, which in
-turn interrupts payment-service's own thread if it's mid-sleep between polls,
-unwinding both sides promptly rather than waiting out the rest of the
-schedule. Starting a new watch for an order that already has one running
-replaces the old one rather than running two in parallel.
+A watch stops on its own as soon as a terminal status is observed —
+payment-service closes the stream server-side, and order-service's
+consuming loop also stops locally on the same condition — rather than
+running for its full `count` regardless. There's no way to cancel a watch
+early from the outside; each call to the watch endpoint starts an
+independent background task, so watching the same order twice runs two
+loops concurrently rather than replacing one with the other.
 
 See [docs/grpc-learnings.md](docs/grpc-learnings.md) for the gRPC concepts
 and trade-offs behind this design.

@@ -2,6 +2,7 @@ package com.example.orderservice.security;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -31,9 +32,7 @@ public class WebSecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         // Must precede the general rule below: first-match-wins.
-                        // Covers both starting (POST) and stopping (DELETE) a
-                        // watch -- no other method is mapped on this path.
-                        .requestMatchers("/api/v1/orders/*/payment-status/watch").hasRole("admin")
+                        .requestMatchers(HttpMethod.POST, "/api/v1/orders/*/payment-status/watch").hasRole("admin")
                         .anyRequest().hasAnyRole("customer", "admin"))
                 .oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter())));
         return http.build();

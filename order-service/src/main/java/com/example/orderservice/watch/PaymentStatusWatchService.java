@@ -63,6 +63,12 @@ public class PaymentStatusWatchService {
         orderRepository.findByOrderId(orderId).orElseThrow(() -> new OrderNotFoundException(orderId));
 
         SecurityContext callerContext = SecurityContextHolder.getContext();
+
+        // This makes sure that the watch is executed in a separate thread(virtual threads),
+        // so that the main thread can continue processing other requests without
+        // being blocked by the watch operation. The SecurityContext is set for the background
+        // thread to ensure that any security-related operations performed during the watch have
+        // the correct context.
         watchExecutor.execute(() -> {
             SecurityContextHolder.setContext(callerContext);
             try {
@@ -86,7 +92,7 @@ public class PaymentStatusWatchService {
                     update.getOrderId(), update.getPaymentId(), update.getStatus().name(), Instant.now()));
 
             if (update.getStatus() != PaymentStatus.PENDING) {
-                log.info("Watch for order {} finished: status={}", orderId, update.getStatus());
+                log.info("Ending watch for order {} finished: status={}", orderId, update.getStatus());
                 break;
             }
         }

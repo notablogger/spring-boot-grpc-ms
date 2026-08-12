@@ -1,0 +1,30 @@
+<svg width="680" height="230" viewBox="0 0 680 230" xmlns="http://www.w3.org/2000/svg" font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif" role="img">
+<title>Four ways a WatchPaymentStatus stream can end</title>
+<desc>A comparison of four triggers that end an open server-streaming call: explicit cancel, the payment reaching a terminal status, a clean process crash, and a silent network partition. The first three are detected automatically; a silent partition is not, because no gRPC keepalive is configured.</desc>
+<rect x="0" y="0" width="680" height="230" fill="#FFFFFF"/>
+<g>
+<rect x="40" y="70" width="130" height="100" rx="8" fill="#DBEAFE" stroke="#3B82F6" stroke-width="1.5"/>
+<text x="105" y="98" text-anchor="middle" font-size="14" font-weight="500" fill="#1E3A8A">Cancel</text>
+<text x="105" y="120" text-anchor="middle" font-size="12" fill="#1D4ED8">explicit DELETE</text>
+<text x="105" y="142" text-anchor="middle" font-size="12" fill="#1D4ED8">instant</text>
+</g>
+<g>
+<rect x="190" y="70" width="130" height="100" rx="8" fill="#DBEAFE" stroke="#3B82F6" stroke-width="1.5"/>
+<text x="255" y="98" text-anchor="middle" font-size="14" font-weight="500" fill="#1E3A8A">Completes</text>
+<text x="255" y="120" text-anchor="middle" font-size="12" fill="#1D4ED8">status settles</text>
+<text x="255" y="142" text-anchor="middle" font-size="12" fill="#1D4ED8">instant</text>
+</g>
+<g>
+<rect x="340" y="70" width="130" height="100" rx="8" fill="#DBEAFE" stroke="#3B82F6" stroke-width="1.5"/>
+<text x="405" y="98" text-anchor="middle" font-size="14" font-weight="500" fill="#1E3A8A">Crash</text>
+<text x="405" y="120" text-anchor="middle" font-size="12" fill="#1D4ED8">OS closes TCP</text>
+<text x="405" y="142" text-anchor="middle" font-size="12" fill="#1D4ED8">seconds</text>
+</g>
+<g>
+<rect x="490" y="70" width="130" height="100" rx="8" fill="#FEE2E2" stroke="#EF4444" stroke-width="1.5"/>
+<text x="555" y="98" text-anchor="middle" font-size="14" font-weight="500" fill="#7F1D1D">Partition</text>
+<text x="555" y="120" text-anchor="middle" font-size="12" fill="#B91C1C">no keepalive</text>
+<text x="555" y="142" text-anchor="middle" font-size="12" fill="#B91C1C">never, by default</text>
+</g>
+<text x="340" y="200" text-anchor="middle" font-size="12" fill="#6B7280">Blue: detected automatically. Red: needs gRPC keepalive to detect.</text>
+</svg>

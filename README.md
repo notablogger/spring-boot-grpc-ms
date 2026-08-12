@@ -34,7 +34,7 @@ spring-grpc/
 ├── order-service/             # gRPC client + REST API
 ├── payment-service/           # gRPC server
 ├── keycloak/realm-export.json # pre-configured realm, roles, test users
-├── docs/                      # container diagram, proto pipeline, auth docs
+├── docs/                      # container diagram, proto pipeline, auth, gRPC learnings
 ├── docker-compose.yml         # runs Keycloak only
 └── .github/workflows/ci.yml   # build + test pipeline
 ```
@@ -181,6 +181,9 @@ turn interrupts payment-service's own thread if it's mid-sleep between polls,
 unwinding both sides promptly rather than waiting out the rest of the
 schedule. Starting a new watch for an order that already has one running
 replaces the old one rather than running two in parallel.
+
+See [docs/grpc-learnings.md](docs/grpc-learnings.md) for the gRPC concepts
+and trade-offs behind this design.
 
 ## Testing
 

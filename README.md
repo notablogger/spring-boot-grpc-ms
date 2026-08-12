@@ -134,39 +134,40 @@ role/ownership rules.
 ## Watching payment status (admin-only)
 
 Alongside the unary `CheckPaymentStatus` RPC above, `payment.proto` also
-defines a **server-streaming** RPC, `WatchPaymentStatus`: it pushes the
-current status immediately, then (for a still-`PENDING` payment) any further
-updates as they happen, before closing the stream once the payment reaches a
-terminal status. order-service exposes an admin-only endpoint that opens this
-stream and consumes it in the background — each update is only logged and
-kept in memory (`PaymentStatusEventStore`), not relayed back over REST:
+defines a **server-streaming** RPC, `WatchPaymentStatus`. There's no push
+mechanism behind it and no shared state in payment-service: each call is a
+self-contained poll loop that re-reads the payment from storage up to
+`watch_count` times, waiting `watch_interval_seconds` between each read, and
+closes early the moment the payment reaches a terminal status. order-service
+exposes an admin-only endpoint that opens this stream and consumes it in the
+background — each update is only logged and kept in memory
+(`PaymentStatusEventStore`), not relayed back over REST. The caller decides
+the schedule (defaulting to 10 polls, 10 seconds apart):
 
 ```bash
-curl -s -X POST http://localhost:8080/api/v1/orders/ORD-1002/payment-status/watch \
+curl -s -X POST "http://localhost:8080/api/v1/orders/ORD-1002/payment-status/watch?count=5&intervalSeconds=3" \
   -H "Authorization: Bearer $ADMIN_TOKEN"
-# 202 Accepted; the stream stays open, waiting for a status change
+# 202 Accepted; payment-service will poll up to 5 times, 3 seconds apart
 ```
 
-There's no timer that settles a `PENDING` payment on its own — a real update
-has to happen. That's payment-service's own admin-only REST endpoint, which
-mutates the stored payment and pushes the new value to every open
-`WatchPaymentStatus` stream for that order (via `PaymentWatchRegistry`):
+Status changes still happen manually, via payment-service's own admin-only
+REST endpoint, which mutates the stored payment directly:
 
 ```bash
 curl -s -X PATCH http://localhost:8082/api/v1/payments/ORD-1002/status \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"status":"completed"}'
-# 200 OK with the updated payment; order-service's log picks up the push
-# (PENDING -> COMPLETED) on the stream opened above, live, with no polling
+# 200 OK with the updated payment
 ```
 
 `status` is matched case-insensitively against `PENDING`, `COMPLETED`,
-`FAILED`, `REFUNDED`. This REST call is entirely local to payment-service —
-no gRPC hop is involved in the mutation itself, only in delivering the push
-to whichever watchers happen to be subscribed.
+`FAILED`, `REFUNDED`. This REST call doesn't know or care whether anything is
+watching — it just writes. A watch only sees the change on its *next* poll,
+so there can be up to `intervalSeconds` of latency between the `PATCH` and
+order-service's log picking it up; there's no live push.
 
-A running watch can also be stopped early, before the payment ever settles:
+A running watch can also be stopped early, before it reaches its last poll:
 
 ```bash
 curl -s -X DELETE http://localhost:8080/api/v1/orders/ORD-1002/payment-status/watch \
@@ -175,11 +176,10 @@ curl -s -X DELETE http://localhost:8080/api/v1/orders/ORD-1002/payment-status/wa
 # 404 Not Found if there was none to cancel
 ```
 
-This interrupts the background thread consuming the gRPC stream, which
-cancels the underlying `WatchPaymentStatus` call — payment-service's
-`PaymentWatchRegistry` then has one fewer subscriber for that order, so a
-later status update via the endpoint above no longer reaches order-service
-at all. Starting a new watch for an order that already has one running
+This interrupts the background thread consuming the gRPC stream, which in
+turn interrupts payment-service's own thread if it's mid-sleep between polls,
+unwinding both sides promptly rather than waiting out the rest of the
+schedule. Starting a new watch for an order that already has one running
 replaces the old one rather than running two in parallel.
 
 ## Testing

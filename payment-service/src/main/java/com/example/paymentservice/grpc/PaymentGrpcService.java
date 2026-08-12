@@ -5,7 +5,6 @@ import com.example.grpc.payment.v1.PaymentStatusRequest;
 import com.example.grpc.payment.v1.PaymentStatusResponse;
 import com.example.paymentservice.model.Payment;
 import com.example.paymentservice.repository.PaymentRepository;
-import com.example.paymentservice.watch.PaymentWatchRegistry;
 import io.grpc.Status;
 import io.grpc.stub.ServerCallStreamObserver;
 import io.grpc.stub.StreamObserver;
@@ -14,6 +13,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.grpc.server.service.GrpcService;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.util.StringUtils;
+
+import java.time.Duration;
+import java.util.Optional;
 
 /**
  * gRPC endpoint implementation for {@code payment.v1.PaymentService}, backed by
@@ -26,11 +28,9 @@ public class PaymentGrpcService extends PaymentServiceGrpc.PaymentServiceImplBas
     private static final Logger log = LoggerFactory.getLogger(PaymentGrpcService.class);
 
     private final PaymentRepository paymentRepository;
-    private final PaymentWatchRegistry watchRegistry;
 
-    public PaymentGrpcService(PaymentRepository paymentRepository, PaymentWatchRegistry watchRegistry) {
+    public PaymentGrpcService(PaymentRepository paymentRepository) {
         this.paymentRepository = paymentRepository;
-        this.watchRegistry = watchRegistry;
     }
 
     @PreAuthorize("hasAnyRole('customer', 'admin')")
@@ -58,11 +58,14 @@ public class PaymentGrpcService extends PaymentServiceGrpc.PaymentServiceImplBas
     }
 
     /**
-     * Pushes the current status immediately, then -- for a payment still
-     * {@code PENDING} -- registers with {@link PaymentWatchRegistry} to
-     * receive any further update pushed by payment-service's REST admin API
-     * ({@code PaymentStatusController}), and unregisters if the client
-     * cancels the stream first.
+     * Polls the current status up to {@code watch_count} times, waiting
+     * {@code watch_interval_seconds} between pushes, closing the stream
+     * early once the payment reaches a terminal state. There is no shared
+     * subscriber registry: each call independently re-reads {@link
+     * PaymentRepository} on every iteration, so a change made via the REST
+     * admin API ({@code PaymentStatusController}) becomes visible on the
+     * next poll rather than being pushed live. The caller (order-service)
+     * chooses the schedule via the request.
      */
     @PreAuthorize("hasAnyRole('customer', 'admin')")
     @Override
@@ -75,26 +78,54 @@ public class PaymentGrpcService extends PaymentServiceGrpc.PaymentServiceImplBas
             return;
         }
 
-        var payment = paymentRepository.findByOrderId(orderId);
-        if (payment.isEmpty()) {
-            log.debug("No payment found for order id {}", orderId);
-            responseObserver.onError(Status.NOT_FOUND
-                    .withDescription("No payment found for order id '%s'".formatted(orderId))
+        int watchCount = request.getWatchCount();
+        int intervalSeconds = request.getWatchIntervalSeconds();
+        if (watchCount < 1 || intervalSeconds < 1) {
+            responseObserver.onError(Status.INVALID_ARGUMENT
+                    .withDescription("watch_count and watch_interval_seconds must both be positive")
                     .asRuntimeException());
             return;
         }
 
-        Payment current = payment.get();
-        responseObserver.onNext(PaymentProtoMapper.toResponse(current));
-
-        if (current.status() != com.example.paymentservice.model.PaymentStatus.PENDING) {
-            responseObserver.onCompleted();
-            return;
-        }
-
-        watchRegistry.subscribe(orderId, responseObserver);
+        // Interrupting this thread is how a client-initiated cancel breaks
+        // us out of the sleep below promptly, instead of waiting out the
+        // rest of the interval before noticing the call is already dead.
+        Thread watchThread = Thread.currentThread();
         if (responseObserver instanceof ServerCallStreamObserver<PaymentStatusResponse> serverCallStreamObserver) {
-            serverCallStreamObserver.setOnCancelHandler(() -> watchRegistry.unsubscribe(orderId, responseObserver));
+            serverCallStreamObserver.setOnCancelHandler(watchThread::interrupt);
         }
+
+        for (int attempt = 0; attempt < watchCount; attempt++) {
+            Optional<Payment> payment = paymentRepository.findByOrderId(orderId);
+            if (payment.isEmpty()) {
+                log.debug("No payment found for order id {}", orderId);
+                responseObserver.onError(Status.NOT_FOUND
+                        .withDescription("No payment found for order id '%s'".formatted(orderId))
+                        .asRuntimeException());
+                return;
+            }
+
+            Payment current = payment.get();
+            responseObserver.onNext(PaymentProtoMapper.toResponse(current));
+
+            if (current.status() != com.example.paymentservice.model.PaymentStatus.PENDING) {
+                responseObserver.onCompleted();
+                return;
+            }
+
+            boolean lastAttempt = attempt == watchCount - 1;
+            if (!lastAttempt) {
+                try {
+                    Thread.sleep(Duration.ofSeconds(intervalSeconds));
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    log.info("Watch for order {} cancelled", orderId);
+                    return;
+                }
+            }
+        }
+
+        // Still PENDING after watch_count polls -- give up rather than wait forever.
+        responseObserver.onCompleted();
     }
 }

@@ -96,9 +96,11 @@ so there's no separate authorization-layer workaround needed here.
 Unlike the gRPC surface (open to `customer` and `admin` alike, subject to
 order-ownership rules enforced upstream in order-service), payment-service's
 own REST API — `PATCH /api/v1/payments/{orderId}/status`, which mutates a
-payment's stored status and pushes the new value to any open
-`WatchPaymentStatus` gRPC streams for that order — is gated entirely to the
-`admin` role, with no per-order ownership concept at all:
+payment's stored status directly — is gated entirely to the `admin` role,
+with no per-order ownership concept at all. This endpoint doesn't push
+anything anywhere; an open `WatchPaymentStatus` stream only sees the change
+on its next poll (see the root [README](../README.md) for how that polling
+schedule works):
 
 ```java
 .authorizeHttpRequests(auth -> auth.anyRequest().hasRole("admin"))

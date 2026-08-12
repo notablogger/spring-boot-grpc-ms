@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -40,16 +41,21 @@ public class OrderController {
 
     /**
      * Starts watching an order's payment status via payment-service's
-     * server-streaming WatchPaymentStatus RPC. Updates are only logged and
-     * recorded internally (see {@link PaymentStatusWatchService}) -- there's
-     * no REST-facing way to read them back. Admin-only (see
+     * server-streaming WatchPaymentStatus RPC, which polls up to {@code
+     * count} times, {@code intervalSeconds} apart -- both caller-specified,
+     * defaulting to 10 and 10. Updates are only logged and recorded
+     * internally (see {@link PaymentStatusWatchService}) -- there's no
+     * REST-facing way to read them back. Admin-only (see
      * {@code WebSecurityConfig}); the stream runs in the background, so this
      * returns immediately.
      */
     @PostMapping("/{orderId}/payment-status/watch")
     @ResponseStatus(HttpStatus.ACCEPTED)
-    public void watchPaymentStatus(@PathVariable String orderId) {
-        paymentStatusWatchService.watchAsync(orderId);
+    public void watchPaymentStatus(
+            @PathVariable String orderId,
+            @RequestParam(defaultValue = "10") int count,
+            @RequestParam(defaultValue = "10") int intervalSeconds) {
+        paymentStatusWatchService.watchAsync(orderId, count, intervalSeconds);
     }
 
     /**

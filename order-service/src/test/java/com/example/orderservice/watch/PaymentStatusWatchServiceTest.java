@@ -52,7 +52,7 @@ class PaymentStatusWatchServiceTest {
                 orderId, "cust-01", BigDecimal.TEN, "USD", Instant.now())));
 
         PaymentStatusClient paymentStatusClient = mock(PaymentStatusClient.class);
-        when(paymentStatusClient.watchPaymentStatus(orderId)).thenReturn(new Iterator<>() {
+        when(paymentStatusClient.watchPaymentStatus(orderId, 5, 10)).thenReturn(new Iterator<>() {
             @Override
             public boolean hasNext() {
                 watchStarted.countDown();
@@ -78,7 +78,7 @@ class PaymentStatusWatchServiceTest {
         PaymentStatusWatchService service = new PaymentStatusWatchService(
                 orderRepository, paymentStatusClient, new PaymentStatusEventStore(), watchExecutor);
 
-        service.watchAsync(orderId);
+        service.watchAsync(orderId, 5, 10);
         assertThat(watchStarted.await(2, TimeUnit.SECONDS)).isTrue();
 
         assertThat(service.cancel(orderId)).isTrue();

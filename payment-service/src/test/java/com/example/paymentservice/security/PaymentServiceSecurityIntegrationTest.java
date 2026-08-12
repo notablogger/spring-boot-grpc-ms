@@ -126,7 +126,7 @@ class PaymentServiceSecurityIntegrationTest {
     @Test
     void watchRejectsCallWithNoToken() {
         PaymentServiceGrpc.PaymentServiceBlockingStub stub = stub();
-        Iterator<PaymentStatusResponse> updates = stub.watchPaymentStatus(request("ORD-1001"));
+        Iterator<PaymentStatusResponse> updates = stub.watchPaymentStatus(watchRequest("ORD-1001", 3, 1));
 
         assertThatThrownBy(updates::hasNext)
                 .isInstanceOf(StatusRuntimeException.class)
@@ -135,34 +135,49 @@ class PaymentServiceSecurityIntegrationTest {
     }
 
     @Test
-    void watchEmitsSingleUpdateForAlreadySettledPayment() {
-        // ORD-1001 is COMPLETED in payments.json -- already terminal, so the
-        // stream should close after exactly one update.
+    void watchRejectsNonPositiveCountOrInterval() {
         when(jwtDecoder.decode("valid-token")).thenReturn(validJwt("cust-01", "customer"));
         PaymentServiceGrpc.PaymentServiceBlockingStub stub = stubWithToken("valid-token");
 
-        Iterator<PaymentStatusResponse> updates = stub.watchPaymentStatus(request("ORD-1001"));
+        Iterator<PaymentStatusResponse> updates = stub.watchPaymentStatus(watchRequest("ORD-1001", 0, 1));
+
+        assertThatThrownBy(updates::hasNext)
+                .isInstanceOf(StatusRuntimeException.class)
+                .extracting(ex -> ((StatusRuntimeException) ex).getStatus().getCode())
+                .isEqualTo(Status.Code.INVALID_ARGUMENT);
+    }
+
+    @Test
+    void watchEmitsSingleUpdateForAlreadySettledPayment() {
+        // ORD-1001 is COMPLETED in payments.json -- already terminal, so the
+        // stream should close after exactly one update regardless of watch_count.
+        when(jwtDecoder.decode("valid-token")).thenReturn(validJwt("cust-01", "customer"));
+        PaymentServiceGrpc.PaymentServiceBlockingStub stub = stubWithToken("valid-token");
+
+        Iterator<PaymentStatusResponse> updates = stub.watchPaymentStatus(watchRequest("ORD-1001", 3, 1));
 
         assertThat(updates.next().getStatus()).isEqualTo(PaymentStatus.COMPLETED);
         assertThat(updates.hasNext()).isFalse();
     }
 
     @Test
-    void watchEmitsSecondUpdateWhenRestApiChangesStatus() throws InterruptedException {
-        // ORD-1002 is PENDING in payments.json. The real trigger for the
-        // second update is the admin REST endpoint (PaymentStatusController)
-        // pushing through PaymentWatchRegistry -- not a timer.
+    void watchEmitsSecondUpdateWhenRepositoryChangesBetweenPolls() throws InterruptedException {
+        // ORD-1002 is PENDING in payments.json. There's no registry pushing
+        // anything here -- the second update only appears because the poll
+        // loop itself wakes up after watch_interval_seconds and re-reads the
+        // repository, picking up whatever the REST endpoint changed in the meantime.
         when(jwtDecoder.decode("watch-token")).thenReturn(validJwt("cust-02", "customer"));
         when(jwtDecoder.decode("admin-token")).thenReturn(validJwt("some-admin", "admin"));
 
         PaymentServiceGrpc.PaymentServiceBlockingStub stub = stubWithToken("watch-token");
-        Iterator<PaymentStatusResponse> updates = stub.watchPaymentStatus(request("ORD-1002"));
+        Iterator<PaymentStatusResponse> updates = stub.watchPaymentStatus(watchRequest("ORD-1002", 2, 2));
 
         assertThat(updates.next().getStatus()).isEqualTo(PaymentStatus.PENDING);
 
-        // Fire the update from a separate thread: the main thread is about
-        // to block on updates.next() waiting for exactly this push, so
-        // issuing the REST call inline here would deadlock.
+        // Fire the update from a separate thread while the watch is asleep
+        // between its first and second poll: the main thread is about to
+        // block on updates.next() waiting for that second poll, so issuing
+        // the REST call inline here would deadlock.
         Thread updater = new Thread(() -> patchStatusWithToken("ORD-1002", "completed", "admin-token"));
         updater.start();
 
@@ -240,6 +255,14 @@ class PaymentServiceSecurityIntegrationTest {
 
     private static PaymentStatusRequest request(String orderId) {
         return PaymentStatusRequest.newBuilder().setOrderId(orderId).build();
+    }
+
+    private static PaymentStatusRequest watchRequest(String orderId, int watchCount, int intervalSeconds) {
+        return PaymentStatusRequest.newBuilder()
+                .setOrderId(orderId)
+                .setWatchCount(watchCount)
+                .setWatchIntervalSeconds(intervalSeconds)
+                .build();
     }
 
     private static Jwt validJwt(String username, String... roles) {

@@ -1,10 +1,8 @@
 package com.example.paymentservice.web;
 
-import com.example.paymentservice.grpc.PaymentProtoMapper;
 import com.example.paymentservice.model.Payment;
 import com.example.paymentservice.model.PaymentStatus;
 import com.example.paymentservice.repository.PaymentRepository;
-import com.example.paymentservice.watch.PaymentWatchRegistry;
 import com.example.paymentservice.web.dto.PaymentStatusView;
 import com.example.paymentservice.web.dto.UpdatePaymentStatusRequest;
 import org.springframework.http.HttpStatus;
@@ -17,20 +15,18 @@ import org.springframework.web.server.ResponseStatusException;
 
 /**
  * Admin-only REST endpoint that mutates a payment's status directly (no
- * gRPC hop needed -- same process as {@code PaymentGrpcService}) and pushes
- * the new value to any open {@code WatchPaymentStatus} gRPC streams via
- * {@link PaymentWatchRegistry}.
+ * gRPC hop needed -- same process as {@code PaymentGrpcService}). There is
+ * no push to any open {@code WatchPaymentStatus} streams here -- a watch
+ * picks up the change on its own next poll of {@link PaymentRepository}.
  */
 @RestController
 @RequestMapping("/api/v1/payments")
 public class PaymentStatusController {
 
     private final PaymentRepository paymentRepository;
-    private final PaymentWatchRegistry watchRegistry;
 
-    public PaymentStatusController(PaymentRepository paymentRepository, PaymentWatchRegistry watchRegistry) {
+    public PaymentStatusController(PaymentRepository paymentRepository) {
         this.paymentRepository = paymentRepository;
-        this.watchRegistry = watchRegistry;
     }
 
     @PatchMapping("/{orderId}/status")
@@ -40,9 +36,6 @@ public class PaymentStatusController {
         Payment updated = paymentRepository.updateStatus(orderId, newStatus)
                 .orElseThrow(() -> new ResponseStatusException(
                         HttpStatus.NOT_FOUND, "No payment found for order id '%s'".formatted(orderId)));
-
-        boolean terminal = newStatus != PaymentStatus.PENDING;
-        watchRegistry.publish(orderId, PaymentProtoMapper.toResponse(updated), terminal);
 
         return toView(updated);
     }

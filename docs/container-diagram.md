@@ -39,7 +39,7 @@ flowchart LR
 | Container | Responsibility | Technology | Port |
 |---|---|---|---|
 | **Order Service** | Public REST API. Validates the caller's JWT and the order exists, enforces that a `customer` may only see their own orders, then delegates to Payment Service over gRPC to check payment status. | Spring Boot 4.1, Spring Web MVC, gRPC client (`spring-boot-starter-grpc-client`), OAuth2 resource server | `8080` (HTTP) |
-| **Payment Service** | gRPC server: independently validates the relayed JWT (`@PreAuthorize`), then looks up (and streams) payment records by order id. Also exposes its own admin-only REST endpoint that mutates a payment's status and pushes the change to any open gRPC watch streams. | Spring Boot 4.1, gRPC server (`spring-boot-starter-grpc-server`), Spring Web MVC, OAuth2 resource server | `9090` (gRPC), `8082` (HTTP) |
+| **Payment Service** | gRPC server: independently validates the relayed JWT (`@PreAuthorize`), then looks up (or repeatedly polls, for watches) payment records by order id. Also exposes its own admin-only REST endpoint that mutates a payment's status directly, with no connection to the gRPC side. | Spring Boot 4.1, gRPC server (`spring-boot-starter-grpc-server`), Spring Web MVC, OAuth2 resource server | `9090` (gRPC), `8082` (HTTP) |
 | **Keycloak** | Shared identity provider both services trust. Issues tokens to clients and exposes the JWKS both services validate against. | Keycloak (Docker), realm `spring-grpc` | `8081` (HTTP, mapped from the container's `8080`) |
 
 ## Relationships
@@ -58,18 +58,18 @@ flowchart LR
   consumes in the background from an admin-only endpoint (also stoppable via
   a matching admin-only `DELETE`, which interrupts the consuming thread and
   cancels the RPC); those updates are only logged and kept in memory, not
-  shown here since they never reach the client. The stream has no timer
-  behind it — the update it eventually
-  delivers is whatever Payment Service's own admin REST endpoint (below)
-  writes, pushed live to every open watcher of that order id via an
-  in-memory subscriber registry (`PaymentWatchRegistry`). See the root
-  [README](../README.md) for details.
+  shown here since they never reach the client. There's no subscriber
+  registry or push mechanism on Payment Service's side: the caller
+  (Order Service) specifies how many times to poll and how long to wait
+  between polls, and Payment Service just re-reads its own storage on that
+  schedule, closing early once the payment reaches a terminal status. See
+  the root [README](../README.md) for details.
 - **Client (admin) → Payment Service**: a separate, synchronous REST call
   (`PATCH /api/v1/payments/{orderId}/status`) that Order Service is not
-  involved in at all — it mutates the stored payment directly and is the
-  real trigger behind the `WatchPaymentStatus` push above. Gated to the
-  `admin` role only, with no order-ownership concept (see
-  [auth.md](auth.md)).
+  involved in at all — it mutates the stored payment directly and has no
+  awareness of whether anything is watching. A watch only sees the change on
+  its next poll, not instantly. Gated to the `admin` role only, with no
+  order-ownership concept (see [auth.md](auth.md)).
 - **Order Service / Payment Service → Keycloak**: both independently validate
   the token's signature against Keycloak's JWKS (via `issuer-uri`); neither
   service trusts the other's validation. See [auth.md](auth.md) for why and

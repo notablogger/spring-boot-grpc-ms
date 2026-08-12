@@ -69,8 +69,12 @@ public class PaymentStatusWatchService {
      * <p>
      * Replaces any watch already running for this order id, stopping the old
      * one first so it doesn't keep running unobserved.
+     *
+     * @param watchCount how many times payment-service should poll before
+     *                   giving up on a payment that never settles
+     * @param intervalSeconds how long payment-service waits between polls
      */
-    public void watchAsync(String orderId) {
+    public void watchAsync(String orderId, int watchCount, int intervalSeconds) {
         orderRepository.findByOrderId(orderId).orElseThrow(() -> new OrderNotFoundException(orderId));
         cancel(orderId);
 
@@ -84,7 +88,7 @@ public class PaymentStatusWatchService {
         Future<?> future = watchExecutor.submit(() -> {
             SecurityContextHolder.setContext(callerContext);
             try {
-                consume(orderId);
+                consume(orderId, watchCount, intervalSeconds);
             } catch (StatusRuntimeException e) {
                 if (e.getStatus().getCode() == Status.Code.CANCELLED) {
                     log.info("Watch for order {} cancelled", orderId);
@@ -117,8 +121,8 @@ public class PaymentStatusWatchService {
         return true;
     }
 
-    private void consume(String orderId) {
-        Iterator<PaymentStatusResponse> updates = paymentStatusClient.watchPaymentStatus(orderId);
+    private void consume(String orderId, int watchCount, int intervalSeconds) {
+        Iterator<PaymentStatusResponse> updates = paymentStatusClient.watchPaymentStatus(orderId, watchCount, intervalSeconds);
         while (updates.hasNext()) {
             PaymentStatusResponse update = updates.next();
             log.info("payment status update: order={} paymentId={} status={}",

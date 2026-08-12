@@ -4,10 +4,10 @@ import com.example.grpc.payment.v1.PaymentStatusResponse;
 import com.example.paymentservice.model.Payment;
 
 /**
- * Domain-to-wire mapping shared by {@link PaymentGrpcService} and
- * payment-service's REST admin API ({@code PaymentStatusController}) --
- * both need to build the same {@link PaymentStatusResponse} shape, the
- * latter to push it via {@code PaymentWatchRegistry}.
+ * Maps {@link Payment} to the {@link PaymentStatusResponse} wire type used
+ * by {@link PaymentGrpcService}'s two RPCs. payment-service's REST admin API
+ * ({@code PaymentStatusController}) has its own separate DTO and doesn't use
+ * this -- it never needs the proto shape.
  */
 public final class PaymentProtoMapper {
 

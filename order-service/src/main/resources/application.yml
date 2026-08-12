@@ -17,5 +17,5 @@ spring:
 
 logging:
   level:
-    com.example.orderservice: INFO
-    org.springframework.grpc: INFO
+    com.example.orderservice: DEBUG
+    org.springframework.grpc: DEBUG

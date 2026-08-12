@@ -1,7 +1,7 @@
 package com.example.paymentservice.web;
 
+import com.example.grpc.payment.v1.PaymentStatus;
 import com.example.paymentservice.model.Payment;
-import com.example.paymentservice.model.PaymentStatus;
 import com.example.paymentservice.repository.PaymentRepository;
 import com.example.paymentservice.web.dto.PaymentStatusView;
 import com.example.paymentservice.web.dto.UpdatePaymentStatusRequest;

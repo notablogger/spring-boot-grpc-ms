@@ -1,5 +1,6 @@
 package com.example.orderservice.web;
 
+import com.example.grpc.payment.v1.PaymentStatus;
 import com.example.orderservice.service.OrderPaymentStatusService;
 import com.example.orderservice.watch.PaymentStatusWatchService;
 import com.example.orderservice.web.dto.PaymentStatusView;
@@ -52,7 +53,8 @@ public class OrderController {
     public void watchPaymentStatus(
             @PathVariable String orderId,
             @RequestParam(defaultValue = "10") int count,
-            @RequestParam(defaultValue = "10") int intervalSeconds) {
-        paymentStatusWatchService.watchAsync(orderId, count, intervalSeconds);
+            @RequestParam(defaultValue = "10") int intervalSeconds,
+            PaymentStatus targetStatus) {
+        paymentStatusWatchService.watchAsync(orderId, count, intervalSeconds,targetStatus);
     }
 }

@@ -32,6 +32,8 @@ message PaymentStatusRequest {
   // How long WatchPaymentStatus waits between polls. Ignored by
   // CheckPaymentStatus.
   int32 watch_interval_seconds = 3;
+  // Target payment status to watch for
+  PaymentStatus target_status = 4;
 }
 
 message PaymentStatusResponse {

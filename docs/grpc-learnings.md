@@ -1,143 +1,155 @@
 # gRPC Learnings
 
-A short reference of gRPC concepts, constraints, and best practices, based on
-building and revising the `WatchPaymentStatus` streaming feature in this
-project.
+A plain-language reference of the gRPC concepts, trade-offs, and mistakes we
+ran into while building and revising the `WatchPaymentStatus` feature in
+this project.
 
 ## The four RPC shapes
 
-Every gRPC RPC has a request stream and a response stream. Unary is the
-special case where both streams hold exactly one message. The four "types"
-are just the four combinations of single/many on each side.
+Every gRPC call is really just a request and a response, and either side can
+be a single message or a stream of messages. "Unary" is just the name for
+the case where both sides are a single message. The four "types" people talk
+about are just the four combinations of that:
+
+| Shape | Client sends | Server sends back | Where you'd see this in the wild | Used here? |
+|---|---|---|---|---|
+| Unary | one message | one message | a normal REST `GET` or `POST` | Yes — `CheckPaymentStatus` |
+| Server streaming | one message | many messages, over time | a live stock ticker, `kubectl get pods --watch` | Yes — `WatchPaymentStatus` |
+| Client streaming | many messages, over time | one message | uploading a large file in chunks | No |
+| Bidirectional streaming | many messages, over time | many messages, over time | a chat app, a live video call | No |
 
 ![The four gRPC RPC shapes](images/grpc-rpc-types.svg)
 
-This project uses unary (`CheckPaymentStatus`) and server-streaming
-(`WatchPaymentStatus`). Client-streaming and bidirectional streaming weren't
-needed here — order-service only ever sends one request per call.
+This project only needed the first two — order-service always sends a single
+request, it just sometimes wants more than one answer back over time.
 
-## What a stream actually is
+## What a "stream" actually is
 
-A server-streaming call is one HTTP/2 stream, held open, carrying a sequence
-of length-prefixed messages before a trailer frame closes it and reports the
-final status. There's no different mechanism for "streaming" versus "unary" —
-only how many message frames get written before the trailer.
+A gRPC call opens one connection (technically, one HTTP/2 stream) and sends
+messages down it, one at a time. A unary call just happens to send exactly
+one message before closing that connection. A streaming call sends more
+than one, spread out over time, before closing it the same way. There's no
+separate "streaming mode" under the hood — just a different number of
+messages on the same kind of connection.
 
-## Cancellation, crashes, and deadlines
+## How a stream can end
 
-A stream can end four ways, and only three of them are detected automatically
-without extra configuration:
+| How it ends | Who notices | How fast | Set up in this project? |
+|---|---|---|---|
+| Explicit cancel | Both sides, if wired up to do so | Instant | No |
+| Normal completion | Both sides | Instant | Yes |
+| Process crash | Both sides, automatically | A few seconds | Yes, automatically |
+| Silent network failure (no clean disconnect) | Nobody, unless keepalive is configured | Never, without keepalive | No |
 
 ![Four ways a WatchPaymentStatus stream can end](images/grpc-stream-end-paths.svg)
 
-- **Explicit cancel**: interrupting the thread blocked in a blocking-stub
-  iterator is grpc-java's documented way to cancel a call from another
-  thread; the server can observe this via
-  `ServerCallStreamObserver.setOnCancelHandler(...)`. This project doesn't
-  use either side of that mechanism — `WatchPaymentStatus` has no external
-  way to be cancelled early. Both sides independently reach the same
-  conclusion instead: payment-service closes the stream once it reads a
-  terminal status, and order-service's consuming loop stops on the same
-  condition, without either one signaling the other.
-- **Terminal completion**: the server calls `onCompleted()`.
-- **Process crash**: the OS closes the TCP connection, which grpc-java
-  reports as a cancellation (server side) or `UNAVAILABLE`/`UNKNOWN` (client
-  side), typically within seconds.
-- **Silent network partition**: without gRPC keepalive configured (`spring.grpc.server.keepalive.*`
-  / `spring.grpc.client.channel.*.keepalive.*`), neither side notices a
-  connection that dies without a clean TCP close. This project does not
-  configure keepalive.
+**Explicit cancel** is a real gRPC feature — you can interrupt a caller's
+thread to abandon a call early, and the server can register a callback to
+find out when that happens. We tried this (see "What changed" below) and
+then removed it: both sides of `WatchPaymentStatus` already stop on their
+own once a payment reaches a final status, so there was nothing left for an
+explicit cancel to do.
 
-Deadlines are a separate concern from all of the above — they bound how long
-a caller is willing to wait, regardless of why the other side might be slow.
-A watch stream that's meant to stay open intentionally has none; a unary call
-made from a synchronous request thread should generally have one, to avoid
-that thread blocking indefinitely if the callee stalls. This project doesn't
-set one on `CheckPaymentStatus` either.
+**Silent network failure** is the one gap this project has, on purpose, for
+now. If a connection just goes dead — no crash, no clean close, packets
+simply stop arriving — neither side finds out unless "keepalive" is turned
+on (periodic pings that time out if nothing answers). We haven't configured
+it here.
 
-## Building pub/sub on top of gRPC is not a framework feature
+**Deadlines** are a separate idea from all of the above: a deadline says "I
+won't wait longer than X for a reply," regardless of why the other side is
+slow. A stream that's *meant* to stay open (like our watch) shouldn't have
+one. A quick, single-answer call made while a user is waiting on a web page
+generally should — otherwise a slow or stuck server can hang that request
+forever. This project doesn't set one on `CheckPaymentStatus` either, which
+is a gap worth fixing before this went anywhere real.
 
-Neither grpc-java nor Spring gRPC (`spring-boot-starter-grpc-server`)
-provides a subscriber registry, broadcast helper, or reactive stub support.
-`@GrpcService` wraps a plain generated `ImplBase` and adds interceptors,
-health checks, and security — nothing about fan-out to multiple open
-streams. A hand-rolled `Map<key, List<StreamObserver>>`, populated by a
-long-lived call and read from elsewhere, is the standard pattern for this —
-confirmed against Spring's own reference docs and independent examples doing
-the identical thing, not specific to this project.
+## Pushing updates to multiple listeners isn't built in
 
-Two real constraints came up when this project used that pattern
-(`PaymentWatchRegistry`, since removed):
+gRPC has no built-in way to say "notify everyone currently watching this."
+Neither grpc-java nor Spring's gRPC support (`spring-boot-starter-grpc-server`)
+gives you a subscriber list or a broadcast helper — you build that part
+yourself, the same way you would in comparable systems:
 
-- **Thread safety**: `StreamObserver` is not documented as thread-safe.
-  Calling `onNext()` from a different thread than whatever created the call
-  is fine; calling it from two threads *concurrently* on the same observer is
-  not. A shared registry makes that concurrent access possible unless
-  callers are careful.
-- **Per-instance state**: an in-memory registry lives in one JVM's heap. It
-  does not coordinate across replicas.
+- A chat server built on websockets keeps a list of open connections per
+  chat room, so a message from one user can be sent to everyone else in
+  that room.
+- Kubernetes' own API server keeps a similar list of open "watch"
+  connections, so it can tell every client watching a resource when it
+  changes.
+
+This project's first version of `WatchPaymentStatus` did the same thing —
+`PaymentWatchRegistry`, a list of open connections per order, fed by the
+REST endpoint that changes a payment's status. It worked, but came with two
+real problems:
+
+- **Thread safety**: the object you call to send a message (`StreamObserver`)
+  isn't safe to call from two threads at once. A shared list makes that
+  mistake easy to make by accident.
+- **One instance only**: that list lives in one server's memory. Run two
+  copies of payment-service behind a load balancer, and each one only knows
+  about the listeners connected to *it* — half your updates silently go
+  nowhere.
 
 ![An in-memory watch registry is per-instance state](images/watch-registry-single-instance.svg)
 
-## gRPC streaming versus a message broker
+## gRPC streaming vs. a message broker (Kafka)
 
-The constraints above are not reasons to avoid gRPC streaming — they're the
-signal for when a broker like Kafka is the better fit instead. The
-distinction:
+The problems above aren't reasons to avoid gRPC streaming — they're the
+signal for when a broker like Kafka is the better tool instead.
 
-| | gRPC streaming | Kafka |
+| | gRPC streaming | Kafka (or similar) |
 |---|---|---|
-| Delivery if nobody's listening | lost | durable, replayable from offset |
-| Producer needs a live connection to each consumer | yes | no — publish and walk away |
-| Multiple independent consumers | each needs its own stream; app code fans out | broker fans out via consumer groups |
-| Operational cost | none beyond the services already running | a broker cluster to run and monitor |
+| If nobody's listening when it happens | the update is lost | saved, and a late listener can catch up |
+| Does the sender need a live connection to each listener? | yes | no — it just publishes and moves on |
+| Many independent listeners | each needs its own connection; your code fans out | the broker fans out for you |
+| Extra infrastructure to run | none | a broker cluster |
 
-The trigger for reaching for a broker isn't "gRPC has constraints" — every
-system does. It's a specific requirement gRPC streaming cannot satisfy:
-replay for a consumer that wasn't listening yet, a durable record of every
-change, or multiple independent downstream services that shouldn't each
-require a dedicated live connection back to the producer.
+Kafka-style systems are the standard choice for things like order-processing
+pipelines, audit trails, or anywhere multiple unrelated services need to
+react to "this happened" independently. The two aren't really competitors,
+either — plenty of real systems use Kafka as the durable backbone and gRPC
+(or websockets) as the "last mile" that pushes a live update to whoever's
+actually looking at a screen right now.
+
+The real question to ask isn't "does gRPC streaming have limits" (it always
+will) — it's "do I need replay for someone who wasn't listening yet, a
+permanent record of every change, or several independent services reacting
+to the same event?" If yes to any of those, that's Kafka. If it's really
+just "tell whoever's currently watching," gRPC streaming is enough.
 
 ## What changed in this project, and why
 
 `WatchPaymentStatus` went through two designs:
 
-1. **Registry-based push**: payment-service tracked open `StreamObserver`s in
-   `PaymentWatchRegistry`; its REST `PATCH` endpoint pushed new values to
-   them directly. Removed because it introduced shared mutable state, a
-   thread-safety gap, and a single-instance assumption, for a feature that
-   didn't need live push.
-2. **Caller-driven poll loop** (current): each `WatchPaymentStatus` call
-   independently re-reads the payment up to `watch_count` times, waiting
-   `watch_interval_seconds` between reads, and closes early on a terminal
-   status. The caller (order-service) sets the schedule. There is no shared
-   state between the REST write path and the gRPC read path — a `PATCH`
-   becomes visible on the watch's next poll, not instantly.
+1. **Registry-based push** (removed): payment-service kept a list of open
+   connections and pushed new values into them directly from the REST
+   endpoint. Removed because of the two problems above — shared state that
+   wasn't thread-safe, and an assumption that only one instance would ever
+   run.
+2. **Caller-driven polling** (current): each call to `WatchPaymentStatus`
+   just checks the payment's status, waits, and checks again — up to
+   `watch_count` times, `watch_interval_seconds` apart, set by the caller
+   (order-service). Nothing is shared between the REST write and the gRPC
+   read; a status change becomes visible on the *next* check, not
+   instantly.
 
-The trade made was latency (up to one interval, instead of immediate) for
-simplicity (no registry, no cross-thread `StreamObserver` access, no
-per-instance assumption).
+The trade: a little latency (up to one interval's delay) in exchange for no
+shared state to get wrong and no assumption about how many servers are
+running.
 
-A manual cancel endpoint (order-service `DELETE .../watch`, backed by
-interrupting the consuming thread and a matching
-`setOnCancelHandler` on payment-service) was added, then removed once both
-sides already stopped on their own whenever a terminal status appeared --
-the explicit cancel path had no case left to handle.
+A manual "stop watching" endpoint was added on top of that, then removed
+again — once both sides already stopped on their own the moment a payment
+settled, there was nothing left for a manual cancel to actually do.
 
 ## Checklist
 
-- Reuse request/response messages across RPCs when they share the same
-  shape; don't force new message types for their own sake.
-- Prefix proto enum values with the enum name (e.g. `PAYMENT_STATUS_PENDING`)
-  to avoid future namespace collisions — this project does not, currently.
-- Set a deadline on any blocking unary call made from a request-handling
-  thread.
-- Configure gRPC keepalive for any stream expected to stay open for more
-  than a few seconds, if silent network partitions need to be detected.
-- Never call `onNext()`/`onCompleted()`/`onError()` on the same
-  `StreamObserver` from more than one thread without synchronizing.
-- Prefer a bounded, caller-parameterized stream over an indefinite one with
-  shared server-side state, when live push isn't a hard requirement.
-- Reach for a broker (Kafka or similar) when the requirement is durability,
-  replay, or multiple independent consumers — not merely because a
-  hand-rolled in-memory pattern has limits.
+| Do this | Why |
+|---|---|
+| Reuse one request/response message across RPCs that share the same shape | Less duplication; don't invent a new message type just for its own sake |
+| Prefix proto enum values with the enum's name (e.g. `PAYMENT_STATUS_PENDING`) | Enum values share a namespace with the whole file, not just their own enum — this project doesn't do this yet |
+| Set a deadline on any quick call made while something else is waiting on it | Otherwise a stuck server can hang your request forever |
+| Turn on gRPC keepalive for any stream expected to stay open more than a few seconds | It's the only way to detect a silently dead connection |
+| Never call a `StreamObserver`'s methods from two threads at once | It isn't documented as safe, and a shared registry makes this mistake easy |
+| Prefer a bounded, caller-driven stream over an open-ended one with shared server state | Simpler, and avoids the two problems above, when a live push isn't a hard requirement |
+| Reach for a broker (Kafka or similar) for durability, replay, or multiple independent listeners | Not just because a hand-rolled in-memory version has limits — every approach does |
